@@ -27,7 +27,7 @@ from app.constants import (
 from app.extensions import db
 from app.models import Project, ProjectLog, ProjectOutput, TranscriptChunk
 from app.queue import enqueue_project_processing
-from app.storage import clear_generated_files, project_original_dir
+from app.storage import clear_generated_files, project_original_dir, project_root
 
 bp = Blueprint("main", __name__)
 
@@ -189,3 +189,17 @@ def download_docx(project_id: int):
         download_name=f"dossier-{project.id}.docx",
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
+
+
+@bp.post("/projects/<int:project_id>/delete")
+def delete_project(project_id: int):
+    import shutil
+
+    project = Project.query.get_or_404(project_id)
+    root = project_root(project.id)
+    db.session.delete(project)
+    db.session.commit()
+    if root.exists():
+        shutil.rmtree(root, ignore_errors=True)
+    flash("Proyecto eliminado.", "success")
+    return redirect(url_for("main.dashboard"))

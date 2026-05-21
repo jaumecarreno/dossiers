@@ -5,23 +5,95 @@
       <h2>Dossier final</h2>
     </div>
     <div class="actions">
-      <a class="button button-primary" href="{{ url_for('main.download_markdown', project_id=project.id) }}">Markdown</a>
-      <a class="button button-primary" href="{{ url_for('main.download_docx', project_id=project.id) }}">DOCX</a>
+      <a class="button button-primary" href="{{ url_for('main.download_markdown', project_id=project.id) }}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+        Markdown
+      </a>
+      <a class="button button-primary" href="{{ url_for('main.download_docx', project_id=project.id) }}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+        DOCX
+      </a>
     </div>
   </div>
 
-  <div class="result-grid">
-    <article>
-      <h3>Dossier final</h3>
-      <pre>{{ project.output.final_dossier_markdown }}</pre>
-    </article>
-    <article>
-      <h3>Resumen por bloques</h3>
-      <pre>{{ project.output.block_summary }}</pre>
-    </article>
-    <article>
-      <h3>Transcripción limpia</h3>
-      <pre>{{ project.output.cleaned_transcript }}</pre>
-    </article>
+  {# Tabs #}
+  <div class="result-tabs" id="result-tabs">
+    <button class="result-tab active" data-tab="dossier" type="button">Dossier</button>
+    <button class="result-tab" data-tab="summary" type="button">Resumen</button>
+    <button class="result-tab" data-tab="transcript" type="button">Transcripción</button>
+  </div>
+
+  {# Dossier tab #}
+  <div class="result-content active" id="tab-dossier">
+    <div class="markdown-toggle">
+      <button class="active" data-view="rendered" type="button">Formateado</button>
+      <button data-view="raw" type="button">Markdown</button>
+    </div>
+    <div class="rendered-markdown" id="dossier-rendered"></div>
+    <pre style="display:none" id="dossier-raw">{{ project.output.final_dossier_markdown }}</pre>
+  </div>
+
+  {# Summary tab #}
+  <div class="result-content" id="tab-summary">
+    <div class="markdown-toggle">
+      <button class="active" data-view="rendered" type="button">Formateado</button>
+      <button data-view="raw" type="button">Markdown</button>
+    </div>
+    <div class="rendered-markdown" id="summary-rendered"></div>
+    <pre style="display:none" id="summary-raw">{{ project.output.block_summary }}</pre>
+  </div>
+
+  {# Transcript tab #}
+  <div class="result-content" id="tab-transcript">
+    <pre>{{ project.output.cleaned_transcript }}</pre>
   </div>
 </section>
+
+<script>
+  (() => {
+    // Render markdown
+    if (typeof marked !== "undefined") {
+      const dossierRaw = document.getElementById("dossier-raw");
+      const summaryRaw = document.getElementById("summary-raw");
+      if (dossierRaw) {
+        document.getElementById("dossier-rendered").innerHTML = marked.parse(dossierRaw.textContent);
+      }
+      if (summaryRaw) {
+        document.getElementById("summary-rendered").innerHTML = marked.parse(summaryRaw.textContent);
+      }
+    }
+
+    // Tab switching
+    document.getElementById("result-tabs").addEventListener("click", (e) => {
+      const btn = e.target.closest(".result-tab");
+      if (!btn) return;
+      document.querySelectorAll(".result-tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".result-content").forEach(c => c.classList.remove("active"));
+      btn.classList.add("active");
+      const tab = document.getElementById("tab-" + btn.dataset.tab);
+      if (tab) tab.classList.add("active");
+    });
+
+    // Markdown toggle (rendered vs raw)
+    document.querySelectorAll(".markdown-toggle").forEach(toggle => {
+      toggle.addEventListener("click", (e) => {
+        const btn = e.target.closest("button");
+        if (!btn) return;
+        const parent = toggle.parentElement;
+        const rendered = parent.querySelector(".rendered-markdown");
+        const raw = parent.querySelector("pre");
+
+        toggle.querySelectorAll("button").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+
+        if (btn.dataset.view === "raw") {
+          if (rendered) rendered.style.display = "none";
+          if (raw) raw.style.display = "";
+        } else {
+          if (rendered) rendered.style.display = "";
+          if (raw) raw.style.display = "none";
+        }
+      });
+    });
+  })();
+</script>
