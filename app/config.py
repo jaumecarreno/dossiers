@@ -35,7 +35,7 @@ class Config:
     RQ_JOB_TIMEOUT_SECONDS = _int_env("RQ_JOB_TIMEOUT_SECONDS", 60 * 60 * 6)
 
     STORAGE_ROOT = os.getenv("STORAGE_ROOT", str(Path.cwd() / "storage"))
-    MAX_UPLOAD_MB = _int_env("MAX_UPLOAD_MB", 2000)
+    MAX_UPLOAD_MB = _int_env("MAX_UPLOAD_MB", 10000)
     MAX_CONTENT_LENGTH = MAX_UPLOAD_MB * 1024 * 1024
 
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
