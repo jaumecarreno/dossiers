@@ -39,6 +39,7 @@ class Project(TimestampMixin, db.Model):
     language = db.Column(db.String(8), nullable=False, default="es")
     template_id = db.Column(db.Integer, db.ForeignKey("templates.id"), nullable=True)
     status = db.Column(db.String(64), nullable=False, default="uploaded", index=True)
+    share_token = db.Column(db.String(64), unique=True, index=True, nullable=True)
     error_message = db.Column(db.Text, nullable=True)
 
     template = db.relationship("Template", back_populates="projects")

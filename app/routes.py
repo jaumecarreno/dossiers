@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import uuid
 
 from flask import (
     Blueprint,
@@ -34,6 +35,25 @@ def add_project_log(project_id: int, message: str, level: str = "info") -> None:
     db.session.add(ProjectLog(project_id=project_id, level=level, message=message))
 
 
+def get_estimated_time(project) -> str | None:
+    if project.status in ("completed", "failed"):
+        return None
+    if not project.duration_seconds:
+        return "~ calculando..."
+    
+    total_minutes = project.duration_seconds / 60.0
+    # Whisper takes ~10-15% of audio length. Let's estimate 10%.
+    # Plus a fixed 1-2 minutes for summary overhead.
+    remaining_minutes = (total_minutes * 0.15) + 2
+    
+    # If chunks exist, calculate based on pending chunks (each 20min chunk takes ~2-3 min)
+    if project.chunks:
+        pending_chunks = sum(1 for c in project.chunks if c.status != "completed")
+        remaining_minutes = pending_chunks * 3 + 1
+        
+    return f"~ {int(remaining_minutes)} min"
+
+
 def _template_context() -> dict:
     templates = Template.query.all()
     return {
@@ -41,13 +61,27 @@ def _template_context() -> dict:
         "language_choices": LANGUAGE_CHOICES,
         "status_labels": STATUS_LABELS,
         "get_project_progress": get_project_progress,
+        "get_estimated_time": get_estimated_time,
     }
 
 
 @bp.get("/")
 def dashboard():
-    projects = Project.query.order_by(Project.created_at.desc()).limit(50).all()
-    return render_template("dashboard.html", projects=projects, **_template_context())
+    q = request.args.get("q", "").strip()
+    query = Project.query
+    if q:
+        search = f"%{q}%"
+        query = query.outerjoin(ProjectOutput).filter(
+            db.or_(
+                Project.title.ilike(search),
+                Project.client_name.ilike(search),
+                Project.event_name.ilike(search),
+                ProjectOutput.full_transcript.ilike(search),
+                ProjectOutput.block_summary.ilike(search),
+            )
+        )
+    projects = query.order_by(Project.created_at.desc()).limit(50).all()
+    return render_template("dashboard.html", projects=projects, q=q, **_template_context())
 
 
 @bp.get("/projects/new")
@@ -142,12 +176,10 @@ def retry_project(project_id: int):
         flash("Solo se pueden reintentar proyectos fallidos.", "error")
         return redirect(url_for("main.project_detail", project_id=project.id))
 
-    TranscriptChunk.query.filter_by(project_id=project.id).delete()
-    ProjectOutput.query.filter_by(project_id=project.id).delete()
-    clear_generated_files(project.id)
+    # Smart Retry: no borramos chunks ni output. tasks.py se encargará de saltar lo hecho.
     project.status = "queued"
     project.error_message = None
-    add_project_log(project.id, "Proyecto reintentado y encolado de nuevo.")
+    add_project_log(project.id, "Proyecto reintentado (Smart Retry).")
     db.session.commit()
 
     try:
@@ -210,7 +242,21 @@ def delete_project(project_id: int):
     return redirect(url_for("main.dashboard"))
 
 
-# ==============================================================================
+@bp.post("/projects/<int:project_id>/share")
+def share_project(project_id: int):
+    project = Project.query.get_or_404(project_id)
+    if not project.share_token:
+        project.share_token = uuid.uuid4().hex
+        db.session.commit()
+        flash("Enlace público generado.", "success")
+    return redirect(url_for("main.project_detail", project_id=project.id))
+
+
+@bp.get("/p/<token>")
+def shared_dossier(token: str):
+    project = Project.query.filter_by(share_token=token).first_or_404()
+    return render_template("projects/shared.html", project=project)
+
 # TEMPLATES CRUD
 # ==============================================================================
 

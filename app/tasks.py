@@ -70,31 +70,37 @@ def _process_project(project_id: int) -> None:
 
         _set_status(project, "extracting_audio", "Extrayendo audio con ffmpeg.")
         project.duration_seconds = get_media_duration(source_path)
-        extract_audio(source_path, audio_path)
+        if not audio_path.exists() or audio_path.stat().st_size == 0:
+            extract_audio(source_path, audio_path)
         db.session.commit()
 
         _set_status(project, "splitting_audio", "Dividiendo audio en fragmentos.")
-        chunk_paths = split_audio(audio_path, project_chunks_dir(project.id), chunk_minutes)
-        for index, chunk_path in enumerate(chunk_paths, start=1):
-            start = (index - 1) * chunk_minutes * 60
-            end = index * chunk_minutes * 60
-            if project.duration_seconds:
-                end = min(end, project.duration_seconds)
-            db.session.add(
-                TranscriptChunk(
-                    project_id=project.id,
-                    chunk_index=index,
-                    audio_path=str(chunk_path),
-                    start_seconds=start,
-                    end_seconds=end,
-                    status="pending",
+        if not project.chunks:
+            chunk_paths = split_audio(audio_path, project_chunks_dir(project.id), chunk_minutes)
+            for index, chunk_path in enumerate(chunk_paths, start=1):
+                start = (index - 1) * chunk_minutes * 60
+                end = index * chunk_minutes * 60
+                if project.duration_seconds:
+                    end = min(end, project.duration_seconds)
+                db.session.add(
+                    TranscriptChunk(
+                        project_id=project.id,
+                        chunk_index=index,
+                        audio_path=str(chunk_path),
+                        start_seconds=start,
+                        end_seconds=end,
+                        status="pending",
+                    )
                 )
-            )
-        db.session.commit()
+            db.session.commit()
 
         _set_status(project, "transcribing", "Transcribiendo fragmentos con OpenAI.")
         transcripts: list[str] = []
         for chunk in project.chunks:
+            if chunk.status == "completed" and chunk.transcript_text:
+                transcripts.append(chunk.transcript_text)
+                continue
+                
             chunk.status = "transcribing"
             db.session.commit()
             try:
@@ -116,28 +122,33 @@ def _process_project(project_id: int) -> None:
         output.full_transcript = full_transcript
         db.session.commit()
 
-        _set_status(project, "cleaning_transcript", "Limpiando transcripción.")
-        output.cleaned_transcript = clean_transcript(full_transcript, project.language)
-        db.session.commit()
+        if not output.cleaned_transcript:
+            _set_status(project, "cleaning_transcript", "Limpiando transcripción.")
+            output.cleaned_transcript = clean_transcript(full_transcript, project.language)
+            db.session.commit()
 
-        _set_status(project, "summarizing", "Generando resumen por bloques.")
-        text_blocks = _split_text(output.cleaned_transcript or "")
-        block_summaries = []
-        for index, block in enumerate(text_blocks, start=1):
-            summary = summarize_chunk(block, project.language)
-            block_summaries.append(f"## Bloque {index}\n\n{summary}")
-        if len(block_summaries) > 1:
-            global_summary = summarize_chunk("\n\n".join(block_summaries), project.language)
-            block_summaries.append(f"## Resumen global\n\n{global_summary}")
-        output.block_summary = "\n\n".join(block_summaries)
-        db.session.commit()
+        if not output.block_summary:
+            _set_status(project, "summarizing", "Generando resumen por bloques.")
+            text_blocks = _split_text(output.cleaned_transcript or "")
+            block_summaries = []
+            for index, block in enumerate(text_blocks, start=1):
+                summary = summarize_chunk(block, project.language)
+                block_summaries.append(f"## Bloque {index}\n\n{summary}")
+            if len(block_summaries) > 1:
+                global_summary = summarize_chunk("\n\n".join(block_summaries), project.language)
+                block_summaries.append(f"## Resumen global\n\n{global_summary}")
+            output.block_summary = "\n\n".join(block_summaries)
+            db.session.commit()
 
-        _set_status(project, "generating_dossier", "Generando dossier final.")
-        output.final_dossier_markdown = generate_final_dossier(
-            project,
-            output.cleaned_transcript or "",
-            output.block_summary or "",
-        )
+        if not output.final_dossier_markdown:
+            _set_status(project, "generating_dossier", "Generando dossier final.")
+            output.final_dossier_markdown = generate_final_dossier(
+                project,
+                output.cleaned_transcript or "",
+                output.block_summary or "",
+            )
+            db.session.commit()
+            
         outputs_dir = project_outputs_dir(project.id)
         markdown_path = outputs_dir / "dossier.md"
         markdown_path.write_text(output.final_dossier_markdown or "", encoding="utf-8")

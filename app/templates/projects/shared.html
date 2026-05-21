@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="es" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ project.title }} - Dossier</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect rx='18' width='100' height='100' fill='%237c5cfc'/><text x='50' y='72' font-size='60' font-family='sans-serif' font-weight='800' fill='white' text-anchor='middle'>D</text></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+      body { background-color: var(--bg-body); color: var(--text); padding: 2rem 1rem; }
+      .shared-container { max-width: 800px; margin: 0 auto; background: var(--bg-panel); border-radius: 12px; border: 1px solid var(--border); box-shadow: 0 10px 30px rgba(0,0,0,0.05); overflow: hidden; }
+      .shared-header { padding: 3rem 2rem; border-bottom: 1px solid var(--border); background: linear-gradient(to right, rgba(124, 92, 252, 0.05), rgba(79, 140, 255, 0.05)); text-align: center; }
+      .shared-header h1 { font-size: 2.5rem; margin-bottom: 0.5rem; color: var(--text); }
+      .shared-header p { font-size: 1.1rem; color: var(--text-muted); }
+      .shared-content { padding: 3rem 2rem; font-size: 1.05rem; line-height: 1.7; }
+      .shared-content h1, .shared-content h2, .shared-content h3 { margin-top: 2rem; margin-bottom: 1rem; }
+      .shared-content ul, .shared-content ol { padding-left: 1.5rem; margin-bottom: 1.5rem; }
+      .shared-content p { margin-bottom: 1.5rem; }
+      .shared-footer { padding: 1.5rem 2rem; border-top: 1px solid var(--border); text-align: center; font-size: 0.9rem; color: var(--text-muted); background: var(--bg-body); }
+      @media (max-width: 600px) {
+        .shared-header { padding: 2rem 1.5rem; }
+        .shared-content { padding: 2rem 1.5rem; }
+        .shared-header h1 { font-size: 1.8rem; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shared-container">
+      <header class="shared-header">
+        <h1>{{ project.title }}</h1>
+        {% if project.client_name or project.event_name %}
+          <p>{{ project.client_name or "Sin cliente" }} {% if project.event_name %}· {{ project.event_name }}{% endif %}</p>
+        {% endif %}
+      </header>
+      
+      <div class="shared-content" id="dossier-content">
+        {% if project.output and project.output.final_dossier_markdown %}
+          {{ project.output.final_dossier_markdown }}
+        {% else %}
+          <p style="text-align:center; color: var(--text-muted);">El dossier aún se está procesando o no está disponible.</p>
+        {% endif %}
+      </div>
+
+      <footer class="shared-footer">
+        Generado con IA por Dossiers
+      </footer>
+    </div>
+
+    <script>
+      const rawText = document.getElementById("dossier-content").innerHTML;
+      if (rawText.trim() && !rawText.includes("El dossier aún se está procesando")) {
+        document.getElementById("dossier-content").innerHTML = marked.parse(rawText.trim());
+      }
+    </script>
+  </body>
+</html>

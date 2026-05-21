@@ -22,11 +22,18 @@
     <div class="status-header">
       <div>
         <p class="eyebrow">Estado</p>
-        <h2>
+        <h2 style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
           <span class="status status-{{ project.status }}">
             <span class="status-dot"></span>
             {{ status_labels[project.status] }}
           </span>
+          {% set est_time = get_estimated_time(project) %}
+          {% if est_time %}
+            <span class="muted" style="font-size: 0.9rem; font-weight: normal; margin-top: 2px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px; margin-right: 0.2rem;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              Tiempo estimado restante: {{ est_time }}
+            </span>
+          {% endif %}
         </h2>
       </div>
       <div class="actions">
