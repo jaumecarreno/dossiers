@@ -20,7 +20,7 @@ target_metadata = db.metadata
 
 
 def _database_url() -> str:
-    return os.getenv("DATABASE_URL") or app.config["SQLALCHEMY_DATABASE_URI"]
+    return app.config["SQLALCHEMY_DATABASE_URI"]
 
 
 def run_migrations_offline() -> None:
