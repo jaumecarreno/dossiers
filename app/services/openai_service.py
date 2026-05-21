@@ -31,6 +31,7 @@ def _text_response(system_prompt: str, user_prompt: str) -> str:
 
 
 def transcribe_audio(file_path: str, language: str | None = None) -> tuple[str, list[dict]]:
+    import openai
     with Path(file_path).open("rb") as audio_file:
         kwargs = {
             "model": current_app.config["OPENAI_TRANSCRIPTION_MODEL"],
@@ -39,7 +40,17 @@ def transcribe_audio(file_path: str, language: str | None = None) -> tuple[str, 
         }
         if language:
             kwargs["language"] = language
-        response = _client().audio.transcriptions.create(**kwargs)
+            
+        try:
+            response = _client().audio.transcriptions.create(**kwargs)
+        except openai.BadRequestError as e:
+            if "unsupported_value" in str(e) or "verbose_json" in str(e):
+                # Fallback for models that don't support verbose_json (like gpt-4o-mini-transcribe)
+                kwargs.pop("response_format", None)
+                audio_file.seek(0)
+                response = _client().audio.transcriptions.create(**kwargs)
+            else:
+                raise
         
     text = getattr(response, "text", "")
     segments = getattr(response, "segments", [])

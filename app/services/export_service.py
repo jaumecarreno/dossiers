@@ -24,11 +24,15 @@ def get_transcript_content(project, include_timestamps: bool = False) -> str:
         
     lines = []
     for chunk in project.chunks:
+        offset = chunk.start_seconds or 0
+        
         if not chunk.segments_json:
-            lines.append(chunk.transcript_text or "")
+            if include_timestamps:
+                lines.append(f"[{format_time(offset)}]\n{chunk.transcript_text or ''}")
+            else:
+                lines.append(chunk.transcript_text or "")
             continue
             
-        offset = chunk.start_seconds or 0
         try:
             segments = json.loads(chunk.segments_json)
             for seg in segments:
