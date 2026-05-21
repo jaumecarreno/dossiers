@@ -11,16 +11,23 @@ def _int_env(name: str, default: int) -> int:
     return int(value)
 
 
+def _clean_database_url(value: str | None) -> str:
+    database_url = (
+        value or "postgresql+psycopg://dossiers:dossiers@localhost:5432/dossiers"
+    )
+    database_url = database_url.strip().strip("\"'`")
+    if database_url.startswith("DATABASE_URL="):
+        database_url = database_url.split("=", 1)[1].strip().strip("\"'`")
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql+psycopg://", 1)
+    elif database_url.startswith("postgresql://"):
+        database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return database_url
+
+
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-only-change-me")
-    _DATABASE_URL = os.getenv("DATABASE_URL") or (
-        "postgresql+psycopg://dossiers:dossiers@localhost:5432/dossiers"
-    )
-    if _DATABASE_URL.startswith("postgres://"):
-        _DATABASE_URL = _DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
-    elif _DATABASE_URL.startswith("postgresql://"):
-        _DATABASE_URL = _DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
-    SQLALCHEMY_DATABASE_URI = _DATABASE_URL
+    SQLALCHEMY_DATABASE_URI = _clean_database_url(os.getenv("DATABASE_URL"))
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
