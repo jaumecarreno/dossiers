@@ -13,10 +13,14 @@ def _int_env(name: str, default: int) -> int:
 
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-only-change-me")
-    SQLALCHEMY_DATABASE_URI = os.getenv(
-        "DATABASE_URL",
-        "postgresql+psycopg://dossiers:dossiers@localhost:5432/dossiers",
+    _DATABASE_URL = os.getenv("DATABASE_URL") or (
+        "postgresql+psycopg://dossiers:dossiers@localhost:5432/dossiers"
     )
+    if _DATABASE_URL.startswith("postgres://"):
+        _DATABASE_URL = _DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
+    elif _DATABASE_URL.startswith("postgresql://"):
+        _DATABASE_URL = _DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+    SQLALCHEMY_DATABASE_URI = _DATABASE_URL
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
