@@ -1,9 +1,15 @@
 <!doctype html>
-<html lang="es">
+<html lang="es" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}Dossiers{% endblock %}</title>
+    <script>
+      (() => {
+        const savedTheme = localStorage.getItem("dossiers-theme");
+        document.documentElement.dataset.theme = savedTheme || "dark";
+      })();
+    </script>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   </head>
@@ -12,6 +18,10 @@
       <a class="brand" href="{{ url_for('main.dashboard') }}">Dossiers</a>
       <nav>
         <a href="{{ url_for('main.dashboard') }}">Proyectos</a>
+        <button class="theme-toggle" type="button" id="theme-toggle" aria-label="Cambiar a tema claro" title="Cambiar tema">
+          <span class="theme-icon theme-icon-light" aria-hidden="true">☀</span>
+          <span class="theme-icon theme-icon-dark" aria-hidden="true">☾</span>
+        </button>
         <a class="button button-primary" href="{{ url_for('main.new_project') }}">Nuevo dossier</a>
       </nav>
     </header>
@@ -29,5 +39,26 @@
 
       {% block content %}{% endblock %}
     </main>
+    <script>
+      (() => {
+        const root = document.documentElement;
+        const toggle = document.getElementById("theme-toggle");
+
+        const syncToggle = () => {
+          const isDark = root.dataset.theme === "dark";
+          toggle.setAttribute("aria-label", isDark ? "Cambiar a tema claro" : "Cambiar a tema oscuro");
+          toggle.setAttribute("title", isDark ? "Cambiar a tema claro" : "Cambiar a tema oscuro");
+        };
+
+        toggle.addEventListener("click", () => {
+          const nextTheme = root.dataset.theme === "dark" ? "light" : "dark";
+          root.dataset.theme = nextTheme;
+          localStorage.setItem("dossiers-theme", nextTheme);
+          syncToggle();
+        });
+
+        syncToggle();
+      })();
+    </script>
   </body>
 </html>
