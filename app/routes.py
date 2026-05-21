@@ -130,6 +130,7 @@ def create_project():
         language=language,
         template_id=template.id,
         status="uploaded",
+        share_token=uuid.uuid4().hex,
     )
     db.session.add(project)
     db.session.flush()
@@ -160,6 +161,9 @@ def create_project():
 @bp.get("/projects/<int:project_id>")
 def project_detail(project_id: int):
     project = Project.query.get_or_404(project_id)
+    if not project.share_token:
+        project.share_token = uuid.uuid4().hex
+        db.session.commit()
     return render_template("projects/detail.html", project=project, **_template_context())
 
 
@@ -240,16 +244,6 @@ def delete_project(project_id: int):
         shutil.rmtree(root, ignore_errors=True)
     flash("Proyecto eliminado.", "success")
     return redirect(url_for("main.dashboard"))
-
-
-@bp.post("/projects/<int:project_id>/share")
-def share_project(project_id: int):
-    project = Project.query.get_or_404(project_id)
-    if not project.share_token:
-        project.share_token = uuid.uuid4().hex
-        db.session.commit()
-        flash("Enlace público generado.", "success")
-    return redirect(url_for("main.project_detail", project_id=project.id))
 
 
 @bp.get("/p/<token>")
