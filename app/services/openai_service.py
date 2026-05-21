@@ -57,7 +57,7 @@ def summarize_chunk(text: str, language: str) -> str:
 
 def generate_final_dossier(project, cleaned_transcript: str, block_summary: str) -> str:
     prompt = final_dossier_prompt(
-        project.template_type,
+        project.template.prompt_instructions,
         project.language,
         project.title,
         project.client_name,

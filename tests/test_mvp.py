@@ -5,12 +5,11 @@ from pathlib import Path
 
 from app.constants import (
     PROJECT_STATUSES,
-    TEMPLATE_TYPES,
     allowed_file,
     get_project_progress,
-    is_valid_template,
 )
-from app.models import Project
+from app.models import Project, Template
+from app.extensions import db
 from app.services.export_service import markdown_to_docx
 from app.services.openai_service import clean_transcript, transcribe_audio
 
@@ -24,6 +23,12 @@ def test_project_creation(client, app, monkeypatch):
 
     monkeypatch.setattr("app.routes.enqueue_project_processing", fake_enqueue)
 
+    with app.app_context():
+        t = Template(name="Test Template", prompt_instructions="- Seccion 1")
+        db.session.add(t)
+        db.session.commit()
+        t_id = t.id
+
     response = client.post(
         "/projects",
         data={
@@ -31,7 +36,7 @@ def test_project_creation(client, app, monkeypatch):
             "client_name": "Cliente",
             "event_name": "Evento",
             "language": "es",
-            "template_type": "resumen_ejecutivo",
+            "template_id": str(t_id),
             "source_file": (io.BytesIO(b"fake audio"), "evento.mp3"),
         },
         content_type="multipart/form-data",
@@ -44,6 +49,7 @@ def test_project_creation(client, app, monkeypatch):
         assert project.status == "queued"
         assert project.source_filename == "evento.mp3"
         assert Path(project.source_file_path).exists()
+        assert project.template_id == t_id
         assert enqueued == [project.id]
 
 
@@ -55,14 +61,13 @@ def test_allowed_file_extensions():
     assert not allowed_file("archivo")
 
 
-def test_template_selection():
-    assert set(TEMPLATE_TYPES) == {
-        "resumen_ejecutivo",
-        "dossier_patrocinadores",
-        "contenido_comunicacion",
-    }
-    assert is_valid_template("resumen_ejecutivo")
-    assert not is_valid_template("plantilla_inventada")
+def test_template_crud(app):
+    with app.app_context():
+        t = Template(name="New Temp", prompt_instructions="Test")
+        db.session.add(t)
+        db.session.commit()
+        assert t.id is not None
+        assert Template.query.count() == 1
 
 
 def test_status_flow_helpers():

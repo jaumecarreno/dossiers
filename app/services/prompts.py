@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from app.constants import TEMPLATE_TYPES
-
-
 def clean_transcript_prompt(language: str) -> str:
     return f"""Sigue estas instrucciones:
 Eres un editor profesional de transcripciones de eventos.
@@ -34,14 +31,12 @@ Idioma de salida: {language}."""
 
 
 def final_dossier_prompt(
-    template_type: str,
+    template_instructions: str,
     language: str,
     title: str,
     client_name: str | None,
     event_name: str | None,
 ) -> str:
-    template = TEMPLATE_TYPES[template_type]
-    sections = "\n".join(f"- {section}" for section in template["sections"])
     return f"""Sigue estas instrucciones:
 Eres un redactor senior especializado en crear dossieres profesionales de eventos para organizaciones, patrocinadores y comunicación corporativa.
 Tienes una transcripción y resúmenes parciales.
@@ -50,12 +45,11 @@ No inventes datos.
 Si falta información, no la rellenes de forma creativa.
 Usa un tono profesional, claro y comercial sin sonar exagerado.
 El resultado debe estar en Markdown.
-La plantilla seleccionada es: {template_type}.
 El idioma de salida es: {language}.
 Datos del proyecto:
 - Título: {title}
 - Cliente: {client_name or "No indicado"}
 - Evento: {event_name or "No indicado"}
 
-Genera el documento final siguiendo esta estructura:
-{sections}"""
+Genera el documento final siguiendo esta estructura e instrucciones:
+{template_instructions}"""

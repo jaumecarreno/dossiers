@@ -16,6 +16,16 @@ class TimestampMixin:
     )
 
 
+class Template(TimestampMixin, db.Model):
+    __tablename__ = "templates"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)
+    prompt_instructions = db.Column(db.Text, nullable=False)
+
+    projects = db.relationship("Project", back_populates="template")
+
+
 class Project(TimestampMixin, db.Model):
     __tablename__ = "projects"
 
@@ -27,10 +37,11 @@ class Project(TimestampMixin, db.Model):
     source_file_path = db.Column(db.String(1024), nullable=False)
     duration_seconds = db.Column(db.Integer, nullable=True)
     language = db.Column(db.String(8), nullable=False, default="es")
-    template_type = db.Column(db.String(64), nullable=False)
+    template_id = db.Column(db.Integer, db.ForeignKey("templates.id"), nullable=True)
     status = db.Column(db.String(64), nullable=False, default="uploaded", index=True)
     error_message = db.Column(db.Text, nullable=True)
 
+    template = db.relationship("Template", back_populates="projects")
     chunks = db.relationship(
         "TranscriptChunk",
         back_populates="project",

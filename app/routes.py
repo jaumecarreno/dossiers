@@ -18,14 +18,12 @@ from werkzeug.utils import secure_filename
 from app.constants import (
     LANGUAGE_CHOICES,
     STATUS_LABELS,
-    TEMPLATE_TYPES,
     allowed_file,
     get_project_progress,
     is_valid_language,
-    is_valid_template,
 )
 from app.extensions import db
-from app.models import Project, ProjectLog, ProjectOutput, TranscriptChunk
+from app.models import Project, ProjectLog, ProjectOutput, TranscriptChunk, Template
 from app.queue import enqueue_project_processing
 from app.storage import clear_generated_files, project_original_dir, project_root
 
@@ -37,8 +35,9 @@ def add_project_log(project_id: int, message: str, level: str = "info") -> None:
 
 
 def _template_context() -> dict:
+    templates = Template.query.all()
     return {
-        "template_types": TEMPLATE_TYPES,
+        "templates": templates,
         "language_choices": LANGUAGE_CHOICES,
         "status_labels": STATUS_LABELS,
         "get_project_progress": get_project_progress,
@@ -62,7 +61,7 @@ def create_project():
     client_name = (request.form.get("client_name") or "").strip() or None
     event_name = (request.form.get("event_name") or "").strip() or None
     language = request.form.get("language") or "es"
-    template_type = request.form.get("template_type") or ""
+    template_id_str = request.form.get("template_id")
     upload = request.files.get("source_file")
 
     if not title:
@@ -71,9 +70,15 @@ def create_project():
     if not is_valid_language(language):
         flash("Idioma no válido.", "error")
         return redirect(url_for("main.new_project"))
-    if not is_valid_template(template_type):
+    if not template_id_str or not template_id_str.isdigit():
         flash("Plantilla no válida.", "error")
         return redirect(url_for("main.new_project"))
+    
+    template = Template.query.get(int(template_id_str))
+    if not template:
+        flash("La plantilla seleccionada no existe.", "error")
+        return redirect(url_for("main.new_project"))
+
     if not upload or not upload.filename:
         flash("Selecciona un archivo de vídeo o audio.", "error")
         return redirect(url_for("main.new_project"))
@@ -89,7 +94,7 @@ def create_project():
         source_filename=filename,
         source_file_path="",
         language=language,
-        template_type=template_type,
+        template_id=template.id,
         status="uploaded",
     )
     db.session.add(project)
@@ -203,3 +208,70 @@ def delete_project(project_id: int):
         shutil.rmtree(root, ignore_errors=True)
     flash("Proyecto eliminado.", "success")
     return redirect(url_for("main.dashboard"))
+
+
+# ==============================================================================
+# TEMPLATES CRUD
+# ==============================================================================
+
+@bp.get("/templates")
+def templates_list():
+    templates = Template.query.order_by(Template.name).all()
+    return render_template("templates/index.html", templates=templates)
+
+
+@bp.get("/templates/new")
+def new_template():
+    return render_template("templates/form.html", template=None)
+
+
+@bp.post("/templates")
+def create_template():
+    name = (request.form.get("name") or "").strip()
+    prompt_instructions = (request.form.get("prompt_instructions") or "").strip()
+
+    if not name or not prompt_instructions:
+        flash("El nombre y las instrucciones son obligatorios.", "error")
+        return redirect(url_for("main.new_template"))
+
+    template = Template(name=name, prompt_instructions=prompt_instructions)
+    db.session.add(template)
+    db.session.commit()
+    flash("Plantilla creada correctamente.", "success")
+    return redirect(url_for("main.templates_list"))
+
+
+@bp.get("/templates/<int:template_id>/edit")
+def edit_template(template_id: int):
+    template = Template.query.get_or_404(template_id)
+    return render_template("templates/form.html", template=template)
+
+
+@bp.post("/templates/<int:template_id>")
+def update_template(template_id: int):
+    template = Template.query.get_or_404(template_id)
+    name = (request.form.get("name") or "").strip()
+    prompt_instructions = (request.form.get("prompt_instructions") or "").strip()
+
+    if not name or not prompt_instructions:
+        flash("El nombre y las instrucciones son obligatorios.", "error")
+        return redirect(url_for("main.edit_template", template_id=template.id))
+
+    template.name = name
+    template.prompt_instructions = prompt_instructions
+    db.session.commit()
+    flash("Plantilla actualizada correctamente.", "success")
+    return redirect(url_for("main.templates_list"))
+
+
+@bp.post("/templates/<int:template_id>/delete")
+def delete_template(template_id: int):
+    template = Template.query.get_or_404(template_id)
+    if template.projects:
+        flash("No se puede eliminar la plantilla porque está en uso por algunos proyectos.", "error")
+        return redirect(url_for("main.templates_list"))
+
+    db.session.delete(template)
+    db.session.commit()
+    flash("Plantilla eliminada correctamente.", "success")
+    return redirect(url_for("main.templates_list"))

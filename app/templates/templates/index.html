@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Plantillas - Dossiers{% endblock %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <p class="eyebrow">Configuración</p>
+      <h1>Plantillas</h1>
+    </div>
+    <a class="button button-primary" href="{{ url_for('main.new_template') }}">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      Nueva plantilla
+    </a>
+  </section>
+
+  {% if templates %}
+    <section class="panel">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Nombre</th>
+              <th>Instrucciones</th>
+              <th>Última modificación</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for template in templates %}
+              <tr>
+                <td><strong>{{ template.name }}</strong></td>
+                <td><span class="muted" style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 400px;" title="{{ template.prompt_instructions }}">{{ template.prompt_instructions }}</span></td>
+                <td>{{ template.updated_at.strftime("%d/%m/%Y") }}</td>
+                <td>
+                  <div style="display:flex; gap:0.5rem; justify-content:flex-end;">
+                    <a class="button button-sm" href="{{ url_for('main.edit_template', template_id=template.id) }}">
+                      Editar
+                    </a>
+                    <form action="{{ url_for('main.delete_template', template_id=template.id) }}" method="post" style="margin:0;" onsubmit="return confirm('¿Seguro que quieres borrar esta plantilla?');">
+                      <button class="button button-danger button-sm" type="submit">
+                        Borrar
+                      </button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% else %}
+    <section class="panel">
+      <div class="empty-state">
+        <div class="empty-state-icon">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        </div>
+        <h2>No hay plantillas</h2>
+        <p>Crea tu primera plantilla para definir cómo la IA debe estructurar los resúmenes.</p>
+        <a class="button button-primary" href="{{ url_for('main.new_template') }}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Crear plantilla
+        </a>
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}

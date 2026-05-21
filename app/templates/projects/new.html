@@ -38,9 +38,9 @@
       </label>
       <label>
         <span>Plantilla</span>
-        <select name="template_type" required>
-          {% for value, template in template_types.items() %}
-            <option value="{{ value }}">{{ template.label }}</option>
+        <select name="template_id" required>
+          {% for template in templates %}
+            <option value="{{ template.id }}">{{ template.name }}</option>
           {% endfor %}
         </select>
       </label>

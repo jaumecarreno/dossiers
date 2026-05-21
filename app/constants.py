@@ -24,52 +24,19 @@ STATUS_LABELS = {
     "uploaded": "Subido",
     "queued": "En cola",
     "extracting_audio": "Extrayendo audio",
-    "splitting_audio": "Dividiendo audio",
+    "splitting_audio": "Dividiendo",
     "transcribing": "Transcribiendo",
-    "cleaning_transcript": "Limpiando transcripción",
+    "cleaning_transcript": "Limpiando texto",
     "summarizing": "Resumiendo",
     "generating_dossier": "Generando dossier",
     "completed": "Completado",
-    "failed": "Fallido",
+    "failed": "Error",
 }
 
-TEMPLATE_TYPES = {
-    "resumen_ejecutivo": {
-        "label": "Resumen ejecutivo",
-        "sections": [
-            "Título",
-            "Contexto de la ponencia",
-            "Ideas principales",
-            "Conclusiones",
-            "Frases destacadas",
-            "Posibles acciones posteriores",
-        ],
-    },
-    "dossier_patrocinadores": {
-        "label": "Dossier para patrocinadores",
-        "sections": [
-            "Título del evento",
-            "Descripción breve de la sesión",
-            "Valor aportado por la ponencia",
-            "Temas tratados",
-            "Mensajes clave",
-            "Impacto para asistentes/público",
-            "Frases aprovechables en comunicación",
-            "Conclusiones para patrocinadores",
-            "Recomendaciones de uso comunicativo",
-        ],
-    },
-    "contenido_comunicacion": {
-        "label": "Contenido para comunicación",
-        "sections": [
-            "Resumen web",
-            "Nota breve para newsletter",
-            "5 publicaciones para LinkedIn",
-            "5 titulares posibles",
-            "10 frases destacadas",
-            "Ideas para carrusel de redes",
-        ],
-    },
+LANGUAGE_CHOICES = {
+    "es": "Español",
+    "en": "Inglés",
+    "ca": "Catalán",
 }
 
 
@@ -77,12 +44,8 @@ def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def is_valid_template(template_type: str) -> bool:
-    return template_type in TEMPLATE_TYPES
-
-
-def is_valid_language(language: str) -> bool:
-    return language in LANGUAGE_CHOICES
+def is_valid_language(lang: str) -> bool:
+    return lang in LANGUAGE_CHOICES
 
 
 def get_project_progress(status: str) -> int:

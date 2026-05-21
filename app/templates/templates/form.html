@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}{{ "Editar plantilla" if template else "Nueva plantilla" }} - Dossiers{% endblock %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <p class="eyebrow">Configuración</p>
+      <h1>{{ "Editar plantilla" if template else "Nueva plantilla" }}</h1>
+    </div>
+  </section>
+
+  <form class="panel form" action="{{ url_for('main.update_template', template_id=template.id) if template else url_for('main.create_template') }}" method="post">
+    <label>
+      <span>Nombre</span>
+      <input type="text" name="name" required maxlength="255" value="{{ template.name if template else '' }}" placeholder="Ej: Dossier Ejecutivo" />
+    </label>
+
+    <label>
+      <span>Instrucciones para la IA</span>
+      <span class="muted" style="display:block; margin-bottom:0.5rem; font-size:0.85rem; line-height:1.4;">
+        Escribe cómo quieres que la IA estructure el contenido. Puedes usar una lista de secciones, pedir un tono concreto, o darle ejemplos.
+      </span>
+      <textarea name="prompt_instructions" required rows="12" style="font-family: monospace; line-height: 1.5;" placeholder="- Título&#10;- Contexto del evento&#10;- Conclusiones clave">{{ template.prompt_instructions if template else '' }}</textarea>
+    </label>
+
+    <div class="form-actions">
+      <a class="button" href="{{ url_for('main.templates_list') }}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        Cancelar
+      </a>
+      <button class="button button-primary" type="submit">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        Guardar plantilla
+      </button>
+    </div>
+  </form>
+{% endblock %}

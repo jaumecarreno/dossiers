@@ -87,7 +87,7 @@
       </div>
       <div>
         <span>Plantilla</span>
-        <strong>{{ template_types[project.template_type].label }}</strong>
+        <strong>{{ project.template.name if project.template else "—" }}</strong>
       </div>
       <div>
         <span>Duración</span>
