@@ -95,6 +95,7 @@ def test_openai_service_uses_mocked_client(app, tmp_path, monkeypatch):
 
     class FakeTranscription:
         text = "Transcripción simulada"
+        segments = [{"start": 0.0, "end": 2.0, "text": "Transcripción simulada"}]
 
     class FakeAudioTranscriptions:
         def create(self, **kwargs):
@@ -120,5 +121,5 @@ def test_openai_service_uses_mocked_client(app, tmp_path, monkeypatch):
     monkeypatch.setattr("app.services.openai_service._client", lambda: FakeClient())
 
     with app.app_context():
-        assert transcribe_audio(str(audio_path), "es") == "Transcripción simulada"
+        assert transcribe_audio(str(audio_path), "es") == ("Transcripción simulada", [{"start": 0.0, "end": 2.0, "text": "Transcripción simulada"}])
         assert clean_transcript("texto", "es") == "Texto limpio"

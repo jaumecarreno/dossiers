@@ -77,6 +77,7 @@ class TranscriptChunk(TimestampMixin, db.Model):
     end_seconds = db.Column(db.Integer, nullable=True)
     status = db.Column(db.String(64), nullable=False, default="pending")
     transcript_text = db.Column(db.Text, nullable=True)
+    segments_json = db.Column(db.Text, nullable=True)
     error_message = db.Column(db.Text, nullable=True)
 
     project = db.relationship("Project", back_populates="chunks")

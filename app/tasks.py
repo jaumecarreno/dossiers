@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 from flask import current_app, has_app_context
 
@@ -104,7 +105,9 @@ def _process_project(project_id: int) -> None:
             chunk.status = "transcribing"
             db.session.commit()
             try:
-                chunk.transcript_text = transcribe_audio(chunk.audio_path, project.language)
+                text, segments = transcribe_audio(chunk.audio_path, project.language)
+                chunk.transcript_text = text
+                chunk.segments_json = json.dumps(segments) if segments else None
                 chunk.status = "completed"
                 transcripts.append(chunk.transcript_text or "")
                 db.session.commit()

@@ -30,21 +30,25 @@ def _text_response(system_prompt: str, user_prompt: str) -> str:
     return str(response).strip()
 
 
-def transcribe_audio(file_path: str, language: str | None = None) -> str:
+def transcribe_audio(file_path: str, language: str | None = None) -> tuple[str, list[dict]]:
     with Path(file_path).open("rb") as audio_file:
         kwargs = {
             "model": current_app.config["OPENAI_TRANSCRIPTION_MODEL"],
             "file": audio_file,
+            "response_format": "verbose_json",
         }
         if language:
             kwargs["language"] = language
         response = _client().audio.transcriptions.create(**kwargs)
-    text = getattr(response, "text", None)
-    if text:
-        return text.strip()
-    if isinstance(response, dict) and response.get("text"):
-        return response["text"].strip()
-    return str(response).strip()
+        
+    text = getattr(response, "text", "")
+    segments = getattr(response, "segments", [])
+    
+    if not text and isinstance(response, dict):
+        text = response.get("text", "")
+        segments = response.get("segments", [])
+        
+    return text.strip(), segments
 
 
 def clean_transcript(text: str, language: str) -> str:

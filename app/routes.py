@@ -26,7 +26,8 @@ from app.constants import (
 from app.extensions import db
 from app.models import Project, ProjectLog, ProjectOutput, TranscriptChunk, Template
 from app.queue import enqueue_project_processing
-from app.storage import clear_generated_files, project_original_dir, project_root
+from app.services.export_service import get_transcript_content, markdown_to_docx
+from app.storage import clear_generated_files, project_original_dir, project_root, project_outputs_dir
 
 bp = Blueprint("main", __name__)
 
@@ -229,6 +230,42 @@ def download_docx(project_id: int):
         as_attachment=True,
         download_name=f"dossier-{project.id}.docx",
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
+@bp.get("/projects/<int:project_id>/download/transcript")
+def download_transcript(project_id: int):
+    project = Project.query.get_or_404(project_id)
+    if not project.output:
+        abort(404)
+
+    fmt = request.args.get("format", "txt")
+    timestamps = request.args.get("timestamps", "false").lower() == "true"
+
+    content = get_transcript_content(project, include_timestamps=timestamps)
+    if not content:
+        abort(404)
+
+    filename_base = f"transcripcion-{project.id}{'-tiempos' if timestamps else ''}"
+
+    if fmt == "docx":
+        outputs_dir = project_outputs_dir(project.id)
+        docx_path = outputs_dir / f"{filename_base}.docx"
+        markdown_to_docx(content, docx_path)
+        return send_file(
+            docx_path,
+            as_attachment=True,
+            download_name=f"{filename_base}.docx",
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+    mimetype = "text/markdown" if fmt == "md" else "text/plain"
+    ext = "md" if fmt == "md" else "txt"
+
+    return Response(
+        content,
+        mimetype=f"{mimetype}; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename_base}.{ext}"},
     )
 
 

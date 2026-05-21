@@ -45,6 +45,21 @@
 
   {# Transcript tab #}
   <div class="result-content" id="tab-transcript">
+    <div style="display: flex; gap: 1.5rem; align-items: center; margin-bottom: 1.5rem; background: var(--panel-soft); padding: 1rem; border-radius: 8px; border: 1px solid var(--line-soft); flex-wrap: wrap;">
+      <div style="flex: 1;">
+        <h3 style="margin-bottom: 0.2rem; font-size: 0.95rem;">Descargar Transcripción</h3>
+        <p class="muted" style="margin: 0; font-size: 0.85rem;">Exporta la transcripción original limpia.</p>
+      </div>
+      <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.85rem; font-weight: 600;">
+        <input type="checkbox" id="transcript-timestamps" value="true" />
+        Incluir notas de tiempo
+      </label>
+      <div class="actions" style="margin-top: 0;">
+        <a class="button button-sm" id="btn-dl-md" href="{{ url_for('main.download_transcript', project_id=project.id, format='md') }}">Markdown</a>
+        <a class="button button-sm" id="btn-dl-txt" href="{{ url_for('main.download_transcript', project_id=project.id, format='txt') }}">TXT</a>
+        <a class="button button-sm" id="btn-dl-docx" href="{{ url_for('main.download_transcript', project_id=project.id, format='docx') }}">DOCX</a>
+      </div>
+    </div>
     <pre>{{ project.output.cleaned_transcript }}</pre>
   </div>
 </section>
@@ -95,5 +110,25 @@
         }
       });
     });
+
+    // Transcript timestamps toggle
+    const tsCheckbox = document.getElementById("transcript-timestamps");
+    if (tsCheckbox) {
+      tsCheckbox.addEventListener("change", (e) => {
+        const checked = e.target.checked;
+        ["btn-dl-md", "btn-dl-txt", "btn-dl-docx"].forEach(id => {
+          const btn = document.getElementById(id);
+          if (btn) {
+            const url = new URL(btn.href);
+            if (checked) {
+              url.searchParams.set("timestamps", "true");
+            } else {
+              url.searchParams.delete("timestamps");
+            }
+            btn.href = url.toString();
+          }
+        });
+      });
+    }
   })();
 </script>

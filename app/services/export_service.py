@@ -3,7 +3,43 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import json
 from docx import Document
+
+
+def format_time(seconds: float) -> str:
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    if h > 0:
+        return f"{h:02}:{m:02}:{s:02}"
+    return f"{m:02}:{s:02}"
+
+
+def get_transcript_content(project, include_timestamps: bool = False) -> str:
+    if not include_timestamps or not project.chunks:
+        if project.output and project.output.full_transcript:
+            return project.output.full_transcript
+        return ""
+        
+    lines = []
+    for chunk in project.chunks:
+        if not chunk.segments_json:
+            lines.append(chunk.transcript_text or "")
+            continue
+            
+        offset = chunk.start_seconds or 0
+        try:
+            segments = json.loads(chunk.segments_json)
+            for seg in segments:
+                start = offset + seg.get("start", 0)
+                text = seg.get("text", "").strip()
+                if text:
+                    lines.append(f"[{format_time(start)}] {text}")
+        except Exception:
+            lines.append(chunk.transcript_text or "")
+            
+    return "\n\n".join(lines).strip()
 
 
 def _strip_markdown_inline(text: str) -> str:
