@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Proyectos - Dossiers{% endblock %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <p class="eyebrow">Panel interno</p>
+      <h1>Proyectos de dossier</h1>
+    </div>
+    <a class="button button-primary" href="{{ url_for('main.new_project') }}">Nuevo dossier</a>
+  </section>
+
+  <section class="panel">
+    {% if projects %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Título</th>
+              <th>Cliente</th>
+              <th>Estado</th>
+              <th>Fecha</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for project in projects %}
+              <tr>
+                <td>
+                  <strong>{{ project.title }}</strong>
+                  {% if project.event_name %}
+                    <span class="muted">{{ project.event_name }}</span>
+                  {% endif %}
+                </td>
+                <td>{{ project.client_name or "—" }}</td>
+                <td><span class="status status-{{ project.status }}">{{ status_labels[project.status] }}</span></td>
+                <td>{{ project.created_at.strftime("%d/%m/%Y %H:%M") }}</td>
+                <td><a href="{{ url_for('main.project_detail', project_id=project.id) }}">Ver</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty">
+        <h2>No hay proyectos todavía</h2>
+        <p>Crea el primer dossier para empezar a procesar audio o vídeo.</p>
+        <a class="button button-primary" href="{{ url_for('main.new_project') }}">Crear proyecto</a>
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

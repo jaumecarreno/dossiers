@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Nuevo dossier - Dossiers{% endblock %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <p class="eyebrow">Nuevo proyecto</p>
+      <h1>Crear dossier</h1>
+    </div>
+  </section>
+
+  <form class="panel form" action="{{ url_for('main.create_project') }}" method="post" enctype="multipart/form-data">
+    <label>
+      <span>Título</span>
+      <input type="text" name="title" required maxlength="255" />
+    </label>
+
+    <div class="form-grid">
+      <label>
+        <span>Cliente</span>
+        <input type="text" name="client_name" maxlength="255" />
+      </label>
+      <label>
+        <span>Evento</span>
+        <input type="text" name="event_name" maxlength="255" />
+      </label>
+    </div>
+
+    <div class="form-grid">
+      <label>
+        <span>Idioma</span>
+        <select name="language">
+          {% for value, label in language_choices.items() %}
+            <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Plantilla</span>
+        <select name="template_type" required>
+          {% for value, template in template_types.items() %}
+            <option value="{{ value }}">{{ template.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <label>
+      <span>Archivo de vídeo o audio</span>
+      <input type="file" name="source_file" accept=".mp4,.mov,.m4v,.mp3,.wav,.m4a,.webm" required />
+    </label>
+
+    <div class="form-actions">
+      <a class="button" href="{{ url_for('main.dashboard') }}">Cancelar</a>
+      <button class="button button-primary" type="submit">Crear y procesar</button>
+    </div>
+  </form>
+{% endblock %}

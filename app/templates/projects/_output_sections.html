@@ -1,0 +1,27 @@
+<section class="panel">
+  <div class="status-header">
+    <div>
+      <p class="eyebrow">Resultado</p>
+      <h2>Dossier final</h2>
+    </div>
+    <div class="actions">
+      <a class="button button-primary" href="{{ url_for('main.download_markdown', project_id=project.id) }}">Markdown</a>
+      <a class="button button-primary" href="{{ url_for('main.download_docx', project_id=project.id) }}">DOCX</a>
+    </div>
+  </div>
+
+  <div class="result-grid">
+    <article>
+      <h3>Dossier final</h3>
+      <pre>{{ project.output.final_dossier_markdown }}</pre>
+    </article>
+    <article>
+      <h3>Resumen por bloques</h3>
+      <pre>{{ project.output.block_summary }}</pre>
+    </article>
+    <article>
+      <h3>Transcripción limpia</h3>
+      <pre>{{ project.output.cleaned_transcript }}</pre>
+    </article>
+  </div>
+</section>

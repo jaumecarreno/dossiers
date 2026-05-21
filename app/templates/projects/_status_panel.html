@@ -1,0 +1,70 @@
+<div
+  id="project-status"
+  {% if project.status not in ["completed", "failed"] %}
+    hx-get="{{ url_for('main.project_status', project_id=project.id) }}"
+    hx-trigger="every 4s"
+    hx-swap="outerHTML"
+  {% endif %}
+>
+  <section class="panel status-panel">
+    <div class="status-header">
+      <div>
+        <p class="eyebrow">Estado</p>
+        <h2><span class="status status-{{ project.status }}">{{ status_labels[project.status] }}</span></h2>
+      </div>
+      {% if project.status == "failed" %}
+        <form action="{{ url_for('main.retry_project', project_id=project.id) }}" method="post">
+          <button class="button button-primary" type="submit">Reintentar</button>
+        </form>
+      {% endif %}
+    </div>
+
+    <div class="progress" aria-label="Progreso">
+      <div style="width: {{ get_project_progress(project.status) }}%"></div>
+    </div>
+
+    {% if project.error_message %}
+      <div class="error-box">{{ project.error_message }}</div>
+    {% endif %}
+
+    <div class="meta-grid">
+      <div>
+        <span>Archivo</span>
+        <strong>{{ project.source_filename }}</strong>
+      </div>
+      <div>
+        <span>Idioma</span>
+        <strong>{{ language_choices[project.language] }}</strong>
+      </div>
+      <div>
+        <span>Plantilla</span>
+        <strong>{{ template_types[project.template_type].label }}</strong>
+      </div>
+      <div>
+        <span>Duración</span>
+        <strong>{% if project.duration_seconds %}{{ (project.duration_seconds // 60) }} min{% else %}—{% endif %}</strong>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Logs</h2>
+    {% if project.logs %}
+      <ol class="logs">
+        {% for log in project.logs[:25] %}
+          <li class="log-{{ log.level }}">
+            <time>{{ log.created_at.strftime("%H:%M:%S") }}</time>
+            <span>{{ log.level }}</span>
+            <p>{{ log.message }}</p>
+          </li>
+        {% endfor %}
+      </ol>
+    {% else %}
+      <p class="muted">Todavía no hay logs.</p>
+    {% endif %}
+  </section>
+
+  {% if project.status == "completed" and project.output %}
+    {% include "projects/_output_sections.html" %}
+  {% endif %}
+</div>
