@@ -59,7 +59,20 @@ def transcribe_audio(file_path: str, language: str | None = None) -> tuple[str, 
         text = response.get("text", "")
         segments = response.get("segments", [])
         
-    return text.strip(), segments
+    # Ensure segments are JSON serializable dictionaries
+    clean_segments = []
+    for s in segments:
+        if isinstance(s, dict):
+            clean_segments.append(s)
+        else:
+            # For OpenAI TranscriptionSegment objects
+            clean_segments.append({
+                "start": getattr(s, "start", 0),
+                "end": getattr(s, "end", 0),
+                "text": getattr(s, "text", "")
+            })
+            
+    return text.strip(), clean_segments
 
 
 def clean_transcript(text: str, language: str) -> str:
