@@ -95,7 +95,7 @@ def create_project():
     title = (request.form.get("title") or "").strip()
     client_name = (request.form.get("client_name") or "").strip() or None
     event_name = (request.form.get("event_name") or "").strip() or None
-    language = request.form.get("language") or "es"
+    language = request.form.get("language") or "auto"
     template_id_str = request.form.get("template_id")
     upload = request.files.get("source_file")
 

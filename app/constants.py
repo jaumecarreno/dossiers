@@ -2,6 +2,7 @@ from __future__ import annotations
 
 ALLOWED_EXTENSIONS = {"mp4", "mov", "m4v", "mp3", "wav", "m4a", "webm"}
 LANGUAGE_CHOICES = {
+    "auto": "Detectar automáticamente",
     "es": "Español",
     "ca": "Català",
     "en": "English",
@@ -34,6 +35,7 @@ STATUS_LABELS = {
 }
 
 LANGUAGE_CHOICES = {
+    "auto": "Detectar automáticamente",
     "es": "Español",
     "en": "Inglés",
     "ca": "Catalán",

@@ -36,7 +36,7 @@ class Project(TimestampMixin, db.Model):
     source_filename = db.Column(db.String(512), nullable=False)
     source_file_path = db.Column(db.String(1024), nullable=False)
     duration_seconds = db.Column(db.Integer, nullable=True)
-    language = db.Column(db.String(8), nullable=False, default="es")
+    language = db.Column(db.String(8), nullable=False, default="auto")
     template_id = db.Column(db.Integer, db.ForeignKey("templates.id"), nullable=True)
     status = db.Column(db.String(64), nullable=False, default="uploaded", index=True)
     share_token = db.Column(db.String(64), unique=True, index=True, nullable=True)
