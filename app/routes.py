@@ -27,6 +27,7 @@ from app.extensions import db
 from app.models import Project, ProjectLog, ProjectOutput, TranscriptChunk, Template
 from app.queue import enqueue_project_processing
 from app.services.export_service import get_transcript_content, markdown_to_docx
+from app.services.media_service import download_youtube_media, is_youtube_url
 from app.storage import clear_generated_files, project_original_dir, project_root, project_outputs_dir
 
 bp = Blueprint("main", __name__)
@@ -98,6 +99,7 @@ def create_project():
     language = request.form.get("language") or "auto"
     template_id_str = request.form.get("template_id")
     upload = request.files.get("source_file")
+    youtube_url = (request.form.get("youtube_url") or "").strip()
 
     if not title:
         flash("El título es obligatorio.", "error")
@@ -115,13 +117,18 @@ def create_project():
         return redirect(url_for("main.new_project"))
 
     if not upload or not upload.filename:
-        flash("Selecciona un archivo de vídeo o audio.", "error")
-        return redirect(url_for("main.new_project"))
-    if not allowed_file(upload.filename):
-        flash("Tipo de archivo no permitido.", "error")
-        return redirect(url_for("main.new_project"))
-
-    filename = secure_filename(upload.filename)
+        if not youtube_url:
+            flash("Selecciona un archivo o indica una URL de YouTube.", "error")
+            return redirect(url_for("main.new_project"))
+        if not is_youtube_url(youtube_url):
+            flash("La URL no parece válida de YouTube.", "error")
+            return redirect(url_for("main.new_project"))
+        filename = "youtube_source.mp3"
+    else:
+        if not allowed_file(upload.filename):
+            flash("Tipo de archivo no permitido.", "error")
+            return redirect(url_for("main.new_project"))
+        filename = secure_filename(upload.filename)
     project = Project(
         title=title,
         client_name=client_name,
@@ -138,7 +145,16 @@ def create_project():
 
     original_dir = project_original_dir(project.id)
     source_path = original_dir / filename
-    upload.save(source_path)
+    if upload and upload.filename:
+        upload.save(source_path)
+    else:
+        try:
+            source_path = download_youtube_media(youtube_url, original_dir)
+        except Exception as exc:
+            db.session.rollback()
+            flash(f"No se pudo descargar el contenido de YouTube: {exc}", "error")
+            return redirect(url_for("main.new_project"))
+        project.source_filename = source_path.name
 
     project.source_file_path = str(source_path)
     project.status = "queued"
