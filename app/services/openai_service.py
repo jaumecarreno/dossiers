@@ -37,7 +37,6 @@ def transcribe_audio(file_path: str, language: str | None = None) -> tuple[str, 
             "model": current_app.config["OPENAI_TRANSCRIPTION_MODEL"],
             "file": audio_file,
             "response_format": "verbose_json",
-            "prompt": "Texto hablado continuo de una conferencia, ponencia o discurso profesional. No hay música, efectos ni suscripciones de youtube. Ignora silencios y ruidos.",
         }
         if language and language != "auto":
             kwargs["language"] = language
