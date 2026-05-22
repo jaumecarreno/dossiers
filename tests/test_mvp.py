@@ -53,6 +53,47 @@ def test_project_creation(client, app, monkeypatch):
         assert enqueued == [project.id]
 
 
+def test_project_creation_from_youtube_url(client, app, tmp_path, monkeypatch):
+    enqueued: list[int] = []
+
+    def fake_enqueue(project_id: int):
+        enqueued.append(project_id)
+        return "job-2"
+
+    def fake_download(url: str, output_dir):
+        path = Path(output_dir) / "youtube_source.mp3"
+        path.write_bytes(b"fake youtube audio")
+        return path
+
+    monkeypatch.setattr("app.routes.enqueue_project_processing", fake_enqueue)
+    monkeypatch.setattr("app.routes.download_youtube_media", fake_download)
+
+    with app.app_context():
+        t = Template(name="YT Template", prompt_instructions="- Seccion YT")
+        db.session.add(t)
+        db.session.commit()
+        t_id = t.id
+
+    response = client.post(
+        "/projects",
+        data={
+            "title": "Desde YouTube",
+            "language": "es",
+            "template_id": str(t_id),
+            "youtube_url": "https://www.youtube.com/watch?v=abc123",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    with app.app_context():
+        project = Project.query.one()
+        assert project.status == "queued"
+        assert project.source_filename == "youtube_source.mp3"
+        assert Path(project.source_file_path).exists()
+        assert enqueued == [project.id]
+
+
 def test_allowed_file_extensions():
     assert allowed_file("video.mp4")
     assert allowed_file("audio.MP3")

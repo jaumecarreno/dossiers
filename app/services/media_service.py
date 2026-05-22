@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 class MediaProcessingError(RuntimeError):
@@ -93,3 +94,35 @@ def split_audio(
     if not chunks:
         raise MediaProcessingError("No se generó ningún fragmento de audio.")
     return chunks
+
+
+def is_youtube_url(url: str) -> bool:
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = parsed.netloc.lower()
+    return any(domain in host for domain in ("youtube.com", "youtu.be"))
+
+
+def download_youtube_media(url: str, output_dir: str | Path) -> Path:
+    output = Path(output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    template = output / "youtube_source.%(ext)s"
+    command = [
+        "yt-dlp",
+        "--no-playlist",
+        "--no-warnings",
+        "-f",
+        "bestaudio/best",
+        "--extract-audio",
+        "--audio-format",
+        "mp3",
+        "-o",
+        str(template),
+        url.strip(),
+    ]
+    _run(command)
+    files = sorted(output.glob("youtube_source.*"))
+    if not files:
+        raise MediaProcessingError("No se pudo descargar el contenido de YouTube.")
+    return files[0]
