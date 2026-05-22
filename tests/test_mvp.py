@@ -8,8 +8,10 @@ from app.constants import (
     DEFAULT_TRANSCRIPTION_MODEL,
     LANGUAGE_CHOICES,
     PROJECT_STATUSES,
+    TRANSCRIPTION_MODEL_COSTS_USD_PER_MINUTE,
     TRANSCRIPTION_MODEL_CHOICES,
     allowed_file,
+    estimate_transcription_cost_usd,
     get_project_progress,
 )
 from app.models import Project, ProjectOutput, Template, TranscriptChunk
@@ -111,6 +113,17 @@ def test_allowed_file_extensions():
     assert not allowed_file("archivo")
 
 
+def test_transcription_cost_estimate_helpers():
+    assert TRANSCRIPTION_MODEL_COSTS_USD_PER_MINUTE == {
+        "gpt-4o-transcribe": 0.006,
+        "gpt-4o-mini-transcribe": 0.003,
+        "whisper-1": 0.006,
+    }
+    assert round(estimate_transcription_cost_usd(3600, "gpt-4o-transcribe"), 3) == 0.36
+    assert round(estimate_transcription_cost_usd(3600, "gpt-4o-mini-transcribe"), 3) == 0.18
+    assert estimate_transcription_cost_usd(None, "whisper-1") is None
+
+
 def test_new_project_defaults_language_to_spanish(client):
     response = client.get("/projects/new")
     html = response.get_data(as_text=True)
@@ -129,6 +142,9 @@ def test_new_project_defaults_language_to_spanish(client):
     ]
     assert '<option value="es" selected>Español</option>' in html
     assert '<option value="gpt-4o-transcribe" selected>Alta calidad</option>' in html
+    assert 'id="transcription-cost-estimate"' in html
+    assert "Solo transcripción; no incluye limpieza, resumen ni dossier." in html
+    assert "0.003" in html
 
 
 def test_project_creation_rejects_invalid_transcription_model(client, app, monkeypatch):

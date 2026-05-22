@@ -22,6 +22,11 @@ TRANSCRIPTION_MODEL_CHOICES = {
         "description": "Modelo clásico con coste por minuto y marcas de tiempo compatibles.",
     },
 }
+TRANSCRIPTION_MODEL_COSTS_USD_PER_MINUTE = {
+    "gpt-4o-transcribe": 0.006,
+    "gpt-4o-mini-transcribe": 0.003,
+    "whisper-1": 0.006,
+}
 
 PROJECT_STATUSES = [
     "uploaded",
@@ -65,6 +70,15 @@ def get_transcription_model_label(model: str | None) -> str:
     if model in TRANSCRIPTION_MODEL_CHOICES:
         return TRANSCRIPTION_MODEL_CHOICES[model]["label"]
     return TRANSCRIPTION_MODEL_CHOICES[DEFAULT_TRANSCRIPTION_MODEL]["label"]
+
+
+def estimate_transcription_cost_usd(duration_seconds: float | int | None, model: str | None) -> float | None:
+    if not duration_seconds or duration_seconds <= 0:
+        return None
+    rate = TRANSCRIPTION_MODEL_COSTS_USD_PER_MINUTE.get(model or DEFAULT_TRANSCRIPTION_MODEL)
+    if rate is None:
+        return None
+    return (float(duration_seconds) / 60.0) * rate
 
 
 def get_project_progress(status: str) -> int:

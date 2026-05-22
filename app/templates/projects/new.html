@@ -44,6 +44,11 @@
           {% endfor %}
         </select>
         <span class="muted" style="display:block; margin-top:0.35rem; font-size:0.8rem;">Alta calidad prioriza precisión; mini optimiza coste.</span>
+        <span class="cost-estimate" id="transcription-cost-estimate" aria-live="polite">
+          <span class="cost-estimate-label">Coste estimado de transcripción</span>
+          <strong id="transcription-cost-value">Selecciona un archivo</strong>
+          <span class="cost-estimate-detail" id="transcription-cost-detail">Solo transcripción; no incluye limpieza, resumen ni dossier.</span>
+        </span>
       </label>
     </div>
 
@@ -114,6 +119,13 @@
       const overlay = document.getElementById("upload-overlay");
       const submitBtn = document.getElementById("submit-btn");
       const youtubeInput = document.getElementById("youtube-url");
+      const transcriptionModel = form.elements.transcription_model;
+      const costValue = document.getElementById("transcription-cost-value");
+      const costDetail = document.getElementById("transcription-cost-detail");
+      const transcriptionCosts = {{ transcription_model_costs_usd_per_minute|tojson }};
+      const transcriptionChoices = {{ transcription_model_choices|tojson }};
+      let mediaDurationSeconds = null;
+      let durationRequestId = 0;
 
       function formatSize(bytes) {
         if (bytes < 1024) return bytes + " B";
@@ -122,24 +134,103 @@
         return (bytes / 1073741824).toFixed(2) + " GB";
       }
 
+      function formatDuration(seconds) {
+        const rounded = Math.max(1, Math.round(seconds));
+        const minutes = Math.floor(rounded / 60);
+        const remainingSeconds = rounded % 60;
+        if (minutes === 0) return `${remainingSeconds} s`;
+        if (remainingSeconds === 0) return `${minutes} min`;
+        return `${minutes} min ${remainingSeconds} s`;
+      }
+
+      function formatUsd(amount) {
+        if (amount > 0 && amount < 0.01) return `US$${amount.toFixed(4)}`;
+        if (amount < 1) return `US$${amount.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}`;
+        return `US$${amount.toFixed(2)}`;
+      }
+
+      function selectedModelLabel() {
+        const choice = transcriptionChoices[transcriptionModel.value];
+        return choice ? choice.label : transcriptionModel.value;
+      }
+
+      function updateCostEstimate(message) {
+        const rate = transcriptionCosts[transcriptionModel.value];
+        if (message) {
+          costValue.textContent = message;
+          costDetail.textContent = "Solo transcripción; no incluye limpieza, resumen ni dossier.";
+          return;
+        }
+        if (!mediaDurationSeconds || !rate) {
+          if ((youtubeInput.value || "").trim()) {
+            costValue.textContent = "Se calculará tras descargar";
+            costDetail.textContent = "Para YouTube no se puede leer la duración antes de crear el dossier.";
+          } else {
+            costValue.textContent = "Selecciona un archivo";
+            costDetail.textContent = "Solo transcripción; no incluye limpieza, resumen ni dossier.";
+          }
+          return;
+        }
+        const estimatedCost = (mediaDurationSeconds / 60) * rate;
+        costValue.textContent = `${formatUsd(estimatedCost)} aprox.`;
+        costDetail.textContent = `${formatDuration(mediaDurationSeconds)} con ${selectedModelLabel()}. Solo transcripción.`;
+      }
+
+      function isVideoFile(file) {
+        const name = file.name.toLowerCase();
+        return file.type.startsWith("video/") || [".mp4", ".mov", ".m4v", ".webm"].some(ext => name.endsWith(ext));
+      }
+
+      function readMediaDuration(file) {
+        const requestId = ++durationRequestId;
+        mediaDurationSeconds = null;
+        updateCostEstimate("Leyendo duración…");
+
+        const media = document.createElement(isVideoFile(file) ? "video" : "audio");
+        const url = URL.createObjectURL(file);
+        media.preload = "metadata";
+        media.onloadedmetadata = () => {
+          URL.revokeObjectURL(url);
+          if (requestId !== durationRequestId) return;
+          mediaDurationSeconds = Number.isFinite(media.duration) ? media.duration : null;
+          updateCostEstimate(mediaDurationSeconds ? null : "No se pudo estimar");
+        };
+        media.onerror = () => {
+          URL.revokeObjectURL(url);
+          if (requestId !== durationRequestId) return;
+          mediaDurationSeconds = null;
+          updateCostEstimate("No se pudo estimar");
+        };
+        media.src = url;
+      }
+
       function showPreview(file) {
         fileName.textContent = file.name;
         fileSize.textContent = formatSize(file.size);
         preview.classList.add("visible");
         dropZone.style.display = "none";
+        readMediaDuration(file);
       }
 
       function clearPreview() {
+        durationRequestId += 1;
+        mediaDurationSeconds = null;
         fileInput.value = "";
         preview.classList.remove("visible");
         dropZone.style.display = "";
+        updateCostEstimate();
       }
 
       fileInput.addEventListener("change", () => {
         if (fileInput.files.length) showPreview(fileInput.files[0]);
+        else clearPreview();
       });
 
       fileRemove.addEventListener("click", clearPreview);
+      transcriptionModel.addEventListener("change", () => updateCostEstimate());
+      youtubeInput.addEventListener("input", () => {
+        if (!fileInput.files.length) updateCostEstimate();
+      });
 
       ["dragenter", "dragover"].forEach(evt => {
         dropZone.addEventListener(evt, e => { e.preventDefault(); dropZone.classList.add("dragover"); });
@@ -156,6 +247,8 @@
           showPreview(files[0]);
         }
       });
+
+      updateCostEstimate();
 
       form.addEventListener("submit", (e) => {
         const hasFile = fileInput.files.length > 0;
