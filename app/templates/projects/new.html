@@ -37,6 +37,18 @@
         </select>
       </label>
       <label>
+        <span>Modelo de transcripción</span>
+        <select name="transcription_model">
+          {% for value, option in transcription_model_choices.items() %}
+            <option value="{{ value }}" {% if value == "gpt-4o-transcribe" %}selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+        <span class="muted" style="display:block; margin-top:0.35rem; font-size:0.8rem;">Alta calidad prioriza precisión; mini optimiza coste.</span>
+      </label>
+    </div>
+
+    <div class="form-grid">
+      <label>
         <span>Plantilla</span>
         <select name="template_id" required>
           {% for template in templates %}

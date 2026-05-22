@@ -97,6 +97,10 @@
         <strong>{{ language_choices[project.language] }}</strong>
       </div>
       <div>
+        <span>Modelo</span>
+        <strong>{{ get_transcription_model_label(project.transcription_model) }}</strong>
+      </div>
+      <div>
         <span>Plantilla</span>
         <strong>{{ project.template.name if project.template else "—" }}</strong>
       </div>

@@ -1,11 +1,26 @@
 from __future__ import annotations
 
 ALLOWED_EXTENSIONS = {"mp4", "mov", "m4v", "mp3", "wav", "m4a", "webm"}
+DEFAULT_TRANSCRIPTION_MODEL = "gpt-4o-transcribe"
 LANGUAGE_CHOICES = {
     "ca": "Catalán",
     "en": "Inglés",
     "es": "Español",
     "auto": "Detectar automáticamente",
+}
+TRANSCRIPTION_MODEL_CHOICES = {
+    "gpt-4o-transcribe": {
+        "label": "Alta calidad",
+        "description": "Mejor precisión para reuniones, ponencias y nombres propios.",
+    },
+    "gpt-4o-mini-transcribe": {
+        "label": "Equilibrado",
+        "description": "Buena calidad con menor coste.",
+    },
+    "whisper-1": {
+        "label": "Económico / Whisper",
+        "description": "Modelo clásico con coste por minuto y marcas de tiempo compatibles.",
+    },
 }
 
 PROJECT_STATUSES = [
@@ -40,6 +55,16 @@ def allowed_file(filename: str) -> bool:
 
 def is_valid_language(lang: str) -> bool:
     return lang in LANGUAGE_CHOICES
+
+
+def is_valid_transcription_model(model: str) -> bool:
+    return model in TRANSCRIPTION_MODEL_CHOICES
+
+
+def get_transcription_model_label(model: str | None) -> str:
+    if model in TRANSCRIPTION_MODEL_CHOICES:
+        return TRANSCRIPTION_MODEL_CHOICES[model]["label"]
+    return TRANSCRIPTION_MODEL_CHOICES[DEFAULT_TRANSCRIPTION_MODEL]["label"]
 
 
 def get_project_progress(status: str) -> int:

@@ -46,9 +46,9 @@ descargable.
 - `MAX_UPLOAD_MB`: límite de subida, por defecto `2000`.
 - `PORT`: puerto web, por defecto `3000`.
 - `OPENAI_API_KEY`: API key de OpenAI.
-- `OPENAI_TRANSCRIPTION_MODEL`: por defecto `gpt-4o-mini-transcribe`.
+- `OPENAI_TRANSCRIPTION_MODEL`: por defecto `gpt-4o-transcribe`.
 - `OPENAI_SUMMARY_MODEL`: por defecto `gpt-5.4-mini`.
-- `TRANSCRIPT_CHUNK_MINUTES`: tamaño de fragmentos, por defecto `20`.
+- `TRANSCRIPT_CHUNK_MINUTES`: objetivo de fragmentos, por defecto `20`; los cortes se ajustan a silencios cercanos cuando es posible.
 
 ## Migraciones
 
@@ -89,11 +89,11 @@ Los tests no llaman a OpenAI real.
 ## Flujo de uso
 
 1. Crear un nuevo proyecto desde el panel.
-2. Seleccionar idioma, plantilla y archivo.
+2. Seleccionar idioma, modelo de transcripción, plantilla y archivo.
 3. La app guarda el original y encola un job.
-4. El worker procesa audio, chunks, transcripción, resumen y dossier.
+4. El worker procesa audio, fragmentos por silencios, transcripción, resumen y dossier.
 5. La vista de detalle muestra estado y logs por HTMX.
-6. Al completar, se pueden descargar Markdown y DOCX.
+6. Al completar, se pueden descargar Markdown, DOCX y PDF.
 
 ## Limitaciones actuales
 

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import string
 
 from flask import current_app, has_app_context
 
+from app.constants import DEFAULT_TRANSCRIPTION_MODEL, LANGUAGE_CHOICES
 from app.extensions import db
 from app.models import Project, ProjectLog, ProjectOutput, TranscriptChunk
 from app.services.export_service import markdown_to_docx
@@ -59,6 +61,64 @@ def _split_text(text: str, max_chars: int = 12000) -> list[str]:
     return parts
 
 
+def _last_words(text: str, max_words: int = 500) -> str:
+    words = text.split()
+    return " ".join(words[-max_words:])
+
+
+def _build_transcription_prompt(project: Project, previous_text: str = "") -> str:
+    language = LANGUAGE_CHOICES.get(project.language, project.language)
+    context_parts = [
+        "Transcribe el audio con precisión y conserva nombres propios, cifras y terminología.",
+        f"Idioma esperado: {language}.",
+        f"Título: {project.title}.",
+    ]
+    if project.client_name:
+        context_parts.append(f"Cliente u organización: {project.client_name}.")
+    if project.event_name:
+        context_parts.append(f"Evento: {project.event_name}.")
+    if previous_text:
+        context_parts.append(
+            "Contexto inmediatamente anterior para continuidad, no lo repitas si ya aparece: "
+            f"{_last_words(previous_text)}"
+        )
+    return "\n".join(context_parts)
+
+
+def _normalize_word(word: str) -> str:
+    return word.strip(string.punctuation + "¿¡“”‘’«»").casefold()
+
+
+def _dedupe_overlap(
+    previous_text: str,
+    current_text: str,
+    max_words: int = 80,
+    min_words: int = 3,
+) -> str:
+    previous_words = previous_text.split()
+    current_words = current_text.split()
+    if not previous_words or not current_words:
+        return current_text
+
+    max_overlap = min(max_words, len(previous_words), len(current_words))
+    previous_norm = [_normalize_word(word) for word in previous_words]
+    current_norm = [_normalize_word(word) for word in current_words]
+    for overlap in range(max_overlap, min_words - 1, -1):
+        if previous_norm[-overlap:] == current_norm[:overlap]:
+            return " ".join(current_words[overlap:]).strip()
+    return current_text
+
+
+def _append_transcript(transcripts: list[str], text: str) -> None:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return
+    if transcripts:
+        cleaned = _dedupe_overlap("\n\n".join(transcripts), cleaned)
+    if cleaned:
+        transcripts.append(cleaned)
+
+
 def _process_project(project_id: int) -> None:
     project = Project.query.get(project_id)
     if not project:
@@ -77,19 +137,15 @@ def _process_project(project_id: int) -> None:
 
         _set_status(project, "splitting_audio", "Dividiendo audio en fragmentos.")
         if not project.chunks:
-            chunk_paths = split_audio(audio_path, project_chunks_dir(project.id), chunk_minutes)
-            for index, chunk_path in enumerate(chunk_paths, start=1):
-                start = (index - 1) * chunk_minutes * 60
-                end = index * chunk_minutes * 60
-                if project.duration_seconds:
-                    end = min(end, project.duration_seconds)
+            chunk_specs = split_audio(audio_path, project_chunks_dir(project.id), chunk_minutes)
+            for index, chunk in enumerate(chunk_specs, start=1):
                 db.session.add(
                     TranscriptChunk(
                         project_id=project.id,
                         chunk_index=index,
-                        audio_path=str(chunk_path),
-                        start_seconds=start,
-                        end_seconds=end,
+                        audio_path=str(chunk.path),
+                        start_seconds=int(round(chunk.start_seconds)),
+                        end_seconds=int(round(chunk.end_seconds)),
                         status="pending",
                     )
                 )
@@ -97,19 +153,30 @@ def _process_project(project_id: int) -> None:
 
         _set_status(project, "transcribing", "Transcribiendo fragmentos con OpenAI.")
         transcripts: list[str] = []
+        transcription_model = (
+            project.transcription_model
+            or current_app.config.get("OPENAI_TRANSCRIPTION_MODEL")
+            or DEFAULT_TRANSCRIPTION_MODEL
+        )
         for chunk in project.chunks:
             if chunk.status == "completed" and chunk.transcript_text:
-                transcripts.append(chunk.transcript_text)
+                _append_transcript(transcripts, chunk.transcript_text)
                 continue
                 
             chunk.status = "transcribing"
             db.session.commit()
             try:
-                text, segments = transcribe_audio(chunk.audio_path, project.language)
+                prompt = _build_transcription_prompt(project, "\n\n".join(transcripts))
+                text, segments = transcribe_audio(
+                    chunk.audio_path,
+                    project.language,
+                    model=transcription_model,
+                    prompt=prompt,
+                )
                 chunk.transcript_text = text
                 chunk.segments_json = json.dumps(segments) if segments else None
                 chunk.status = "completed"
-                transcripts.append(chunk.transcript_text or "")
+                _append_transcript(transcripts, chunk.transcript_text or "")
                 db.session.commit()
             except Exception as exc:
                 chunk.status = "failed"
