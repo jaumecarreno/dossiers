@@ -23,7 +23,7 @@ MIN_SILENCE_SECONDS = 0.7
 TARGET_CHUNK_SECONDS = 20 * 60
 MIN_CHUNK_SECONDS = 16 * 60
 MAX_CHUNK_SECONDS = 22 * 60
-CHUNK_OVERLAP_SECONDS = 6
+CHUNK_OVERLAP_SECONDS = 15
 MAX_CHUNK_BYTES = 23 * 1024 * 1024
 TARGET_AUDIO_BITRATE_BPS = 64_000
 
@@ -70,6 +70,45 @@ def extract_audio(input_path: str | Path, output_path: str | Path) -> Path:
         "-i",
         str(input_path),
         "-vn",
+        "-acodec",
+        "libmp3lame",
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        "-b:a",
+        "64k",
+        str(output),
+    ]
+    _run(command)
+    return output
+
+
+def normalize_audio(input_path: str | Path, output_path: str | Path) -> Path:
+    """Normalize volume and reduce background noise for better transcription.
+
+    Applies in a single FFmpeg pass:
+    - highpass  80 Hz  – removes low-frequency rumble (AC, footsteps)
+    - lowpass   8 kHz  – cuts frequencies above useful speech range
+    - afftdn   -20 dB  – gentle FFT-based noise reduction
+    - loudnorm EBU R128 – equalises loudness across the recording
+    """
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    af_filters = ",".join([
+        "highpass=f=80",
+        "lowpass=f=8000",
+        "afftdn=nf=-20",
+        "loudnorm=I=-16:TP=-1.5:LRA=11",
+    ])
+    command = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(input_path),
+        "-vn",
+        "-af",
+        af_filters,
         "-acodec",
         "libmp3lame",
         "-ar",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 import json
 import string
@@ -10,7 +11,7 @@ from app.constants import DEFAULT_TRANSCRIPTION_MODEL, LANGUAGE_CHOICES
 from app.extensions import db
 from app.models import Project, ProjectLog, ProjectOutput, TranscriptChunk
 from app.services.export_service import markdown_to_docx
-from app.services.media_service import extract_audio, get_media_duration, split_audio
+from app.services.media_service import extract_audio, get_media_duration, normalize_audio, split_audio
 from app.services.openai_service import (
     clean_transcript,
     generate_final_dossier,
@@ -61,9 +62,30 @@ def _split_text(text: str, max_chars: int = 12000) -> list[str]:
     return parts
 
 
-def _last_words(text: str, max_words: int = 500) -> str:
+def _last_words(text: str, max_words: int = 300) -> str:
     words = text.split()
     return " ".join(words[-max_words:])
+
+
+def _extract_key_terms(text: str, max_terms: int = 30) -> list[str]:
+    """Extract frequently-occurring capitalised words (likely proper nouns / jargon)."""
+    words = text.split()
+    capitalized = [
+        w.strip(string.punctuation + "¿¡\u201c\u201d\u2018\u2019\u00ab\u00bb")
+        for w in words
+        if w[0:1].isupper() and len(w) > 2
+    ]
+    counts = Counter(capitalized)
+    common_starts = {
+        "El", "La", "Los", "Las", "Un", "Una", "En", "De", "Del",
+        "Por", "Para", "Con", "Sin", "Que", "No", "Es", "Se", "The",
+        "And", "But", "This", "That", "Als", "Amb", "Per", "Com",
+    }
+    return [
+        term
+        for term, _ in counts.most_common(max_terms + len(common_starts))
+        if term not in common_starts
+    ][:max_terms]
 
 
 def _build_transcription_prompt(project: Project, previous_text: str = "") -> str:
@@ -78,6 +100,11 @@ def _build_transcription_prompt(project: Project, previous_text: str = "") -> st
     if project.event_name:
         context_parts.append(f"Evento: {project.event_name}.")
     if previous_text:
+        key_terms = _extract_key_terms(previous_text)
+        if key_terms:
+            context_parts.append(
+                f"Vocabulario recurrente (conservar grafía): {', '.join(key_terms)}"
+            )
         context_parts.append(
             "Contexto inmediatamente anterior para continuidad, no lo repitas si ya aparece: "
             f"{_last_words(previous_text)}"
@@ -92,7 +119,7 @@ def _normalize_word(word: str) -> str:
 def _dedupe_overlap(
     previous_text: str,
     current_text: str,
-    max_words: int = 80,
+    max_words: int = 120,
     min_words: int = 3,
 ) -> str:
     previous_words = previous_text.split()
@@ -126,13 +153,15 @@ def _process_project(project_id: int) -> None:
 
     try:
         source_path = Path(project.source_file_path)
+        raw_audio_path = project_audio_dir(project.id) / "audio_raw.mp3"
         audio_path = project_audio_dir(project.id) / "audio.mp3"
         chunk_minutes = current_app.config["TRANSCRIPT_CHUNK_MINUTES"]
 
         _set_status(project, "extracting_audio", "Extrayendo audio con ffmpeg.")
         project.duration_seconds = get_media_duration(source_path)
         if not audio_path.exists() or audio_path.stat().st_size == 0:
-            extract_audio(source_path, audio_path)
+            extract_audio(source_path, raw_audio_path)
+            normalize_audio(raw_audio_path, audio_path)
         db.session.commit()
 
         _set_status(project, "splitting_audio", "Dividiendo audio en fragmentos.")
