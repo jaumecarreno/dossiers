@@ -12,7 +12,7 @@ descargable.
 - Transcribe con OpenAI.
 - Limpia transcripción, resume por bloques y genera un dossier final.
 - Permite revisar transcripción, resumen y dossier en la web.
-- Exporta Markdown y DOCX.
+- Exporta Markdown, DOCX y PDF para transcripciones.
 - Mantiene historial, estados y logs por proyecto.
 
 ## Arranque local con Docker
@@ -102,7 +102,7 @@ Los tests no llaman a OpenAI real.
 - Sin edición colaborativa ni revisión avanzada.
 - Sin detección de hablantes.
 - Sin marcas de tiempo en el dossier final.
-- Sin exportación PDF.
+- Sin exportación PDF del dossier final.
 - La calidad depende de OpenAI y de la calidad del audio.
 
 ## Despliegue Dokploy
@@ -125,6 +125,6 @@ dependencias Python forman parte del runtime.
 - Borrado automático de archivos.
 - Detección de hablantes.
 - Marcas de tiempo.
-- Exportación PDF.
+- Exportación PDF del dossier final.
 - Generación de posts para redes.
 - Modo multi-evento.

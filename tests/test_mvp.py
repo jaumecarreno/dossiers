@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
 from app.constants import (
+    LANGUAGE_CHOICES,
     PROJECT_STATUSES,
     allowed_file,
     get_project_progress,
 )
-from app.models import Project, Template
+from app.models import Project, ProjectOutput, Template, TranscriptChunk
 from app.extensions import db
-from app.services.export_service import markdown_to_docx
+from app.services.export_service import get_transcript_content, markdown_to_docx, text_to_pdf
 from app.services.openai_service import clean_transcript, transcribe_audio
 
 
@@ -102,6 +104,20 @@ def test_allowed_file_extensions():
     assert not allowed_file("archivo")
 
 
+def test_new_project_defaults_language_to_spanish(client):
+    response = client.get("/projects/new")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert list(LANGUAGE_CHOICES.items()) == [
+        ("ca", "Catalán"),
+        ("en", "Inglés"),
+        ("es", "Español"),
+        ("auto", "Detectar automáticamente"),
+    ]
+    assert '<option value="es" selected>Español</option>' in html
+
+
 def test_template_crud(app):
     with app.app_context():
         t = Template(name="New Temp", prompt_instructions="Test")
@@ -119,6 +135,78 @@ def test_status_flow_helpers():
         assert 0 <= get_project_progress(status) <= 100
 
 
+def test_project_detail_in_progress_has_public_link_placeholder(client, app):
+    with app.app_context():
+        project = Project(
+            title="Jornada en proceso",
+            source_filename="evento.mp3",
+            source_file_path="evento.mp3",
+            language="es",
+            status="transcribing",
+            share_token="token-en-proceso",
+        )
+        db.session.add(project)
+        db.session.commit()
+        project_id = project.id
+
+    response = client.get(f"/projects/{project_id}")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert 'id="public-link-action"' in html
+    assert "Ver Enlace Público" not in html
+
+
+def test_project_detail_completed_shows_public_link(client, app):
+    with app.app_context():
+        project = Project(
+            title="Jornada completada",
+            source_filename="evento.mp3",
+            source_file_path="evento.mp3",
+            language="es",
+            status="completed",
+            share_token="token-completado",
+        )
+        db.session.add(project)
+        db.session.commit()
+        project_id = project.id
+
+    response = client.get(f"/projects/{project_id}")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert 'id="public-link-action"' in html
+    assert "Ver Enlace Público" in html
+    assert "/p/token-completado" in html
+
+
+def test_project_status_htmx_includes_public_link_oob_when_completed(client, app):
+    with app.app_context():
+        project = Project(
+            title="Jornada completada",
+            source_filename="evento.mp3",
+            source_file_path="evento.mp3",
+            language="es",
+            status="completed",
+            share_token="token-htmx",
+        )
+        db.session.add(project)
+        db.session.commit()
+        project_id = project.id
+
+    response = client.get(
+        f"/projects/{project_id}/status",
+        headers={"HX-Request": "true"},
+    )
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert 'id="public-link-action"' in html
+    assert 'hx-swap-oob="true"' in html
+    assert "Ver Enlace Público" in html
+    assert "/p/token-htmx" in html
+
+
 def test_markdown_to_docx_creates_file(tmp_path):
     output_path = tmp_path / "dossier.docx"
     markdown_to_docx(
@@ -127,6 +215,54 @@ def test_markdown_to_docx_creates_file(tmp_path):
     )
 
     assert output_path.exists()
+    assert output_path.stat().st_size > 0
+
+
+def test_transcript_content_uses_time_ranges_before_paragraphs(app):
+    with app.app_context():
+        project = Project(
+            title="Jornada test",
+            source_filename="evento.mp3",
+            source_file_path="evento.mp3",
+            language="es",
+            status="completed",
+        )
+        project.output = ProjectOutput(full_transcript="Texto sin marcas")
+        project.chunks.append(
+            TranscriptChunk(
+                chunk_index=1,
+                audio_path="chunk.mp3",
+                start_seconds=0,
+                end_seconds=90,
+                status="completed",
+                transcript_text="Texto con marcas",
+                segments_json=json.dumps(
+                    [
+                        {"start": 0.0, "end": 39.0, "text": "Primer bloque."},
+                        {"start": 39.0, "end": 80.0, "text": "Segundo bloque."},
+                    ]
+                ),
+            )
+        )
+        db.session.add(project)
+        db.session.commit()
+
+        content = get_transcript_content(project, include_timestamps=True)
+
+    assert content == (
+        "(0:00 - 0:39)\n"
+        "Primer bloque.\n\n"
+        "(0:39 - 1:20)\n"
+        "Segundo bloque."
+    )
+
+
+def test_text_to_pdf_creates_pdf_file(tmp_path):
+    output_path = tmp_path / "transcripcion.pdf"
+    text_to_pdf("(0:00 - 0:11)\nTexto con acentos y preguntas: ¿qué tal?", output_path)
+
+    assert output_path.exists()
+    assert output_path.read_bytes().startswith(b"%PDF-1.4")
     assert output_path.stat().st_size > 0
 
 

@@ -58,6 +58,7 @@
         <a class="button button-sm" id="btn-dl-md" href="{{ url_for('main.download_transcript', project_id=project.id, format='md') }}">Markdown</a>
         <a class="button button-sm" id="btn-dl-txt" href="{{ url_for('main.download_transcript', project_id=project.id, format='txt') }}">TXT</a>
         <a class="button button-sm" id="btn-dl-docx" href="{{ url_for('main.download_transcript', project_id=project.id, format='docx') }}">DOCX</a>
+        <a class="button button-sm" id="btn-dl-pdf" href="{{ url_for('main.download_transcript', project_id=project.id, format='pdf') }}">PDF</a>
       </div>
     </div>
     <pre>{{ project.output.cleaned_transcript }}</pre>
@@ -116,7 +117,7 @@
     if (tsCheckbox) {
       tsCheckbox.addEventListener("change", (e) => {
         const checked = e.target.checked;
-        ["btn-dl-md", "btn-dl-txt", "btn-dl-docx"].forEach(id => {
+        ["btn-dl-md", "btn-dl-txt", "btn-dl-docx", "btn-dl-pdf"].forEach(id => {
           const btn = document.getElementById(id);
           if (btn) {
             const url = new URL(btn.href);

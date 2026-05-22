@@ -26,7 +26,7 @@ from app.constants import (
 from app.extensions import db
 from app.models import Project, ProjectLog, ProjectOutput, TranscriptChunk, Template
 from app.queue import enqueue_project_processing
-from app.services.export_service import get_transcript_content, markdown_to_docx
+from app.services.export_service import get_transcript_content, markdown_to_docx, text_to_pdf
 from app.services.media_service import download_youtube_media, is_youtube_url
 from app.storage import clear_generated_files, project_original_dir, project_root, project_outputs_dir
 
@@ -96,7 +96,7 @@ def create_project():
     title = (request.form.get("title") or "").strip()
     client_name = (request.form.get("client_name") or "").strip() or None
     event_name = (request.form.get("event_name") or "").strip() or None
-    language = request.form.get("language") or "auto"
+    language = request.form.get("language") or "es"
     template_id_str = request.form.get("template_id")
     upload = request.files.get("source_file")
     youtube_url = (request.form.get("youtube_url") or "").strip()
@@ -187,7 +187,12 @@ def project_detail(project_id: int):
 @bp.get("/projects/<int:project_id>/status")
 def project_status(project_id: int):
     project = Project.query.get_or_404(project_id)
-    return render_template("projects/_status_panel.html", project=project, **_template_context())
+    return render_template(
+        "projects/_status_panel.html",
+        project=project,
+        public_link_oob=request.headers.get("HX-Request") == "true",
+        **_template_context(),
+    )
 
 
 @bp.post("/projects/<int:project_id>/retry")
@@ -267,12 +272,23 @@ def download_transcript(project_id: int):
     if fmt == "docx":
         outputs_dir = project_outputs_dir(project.id)
         docx_path = outputs_dir / f"{filename_base}.docx"
-        markdown_to_docx(content, docx_path)
+        markdown_to_docx(content, docx_path, promote_first_paragraph=False)
         return send_file(
             docx_path,
             as_attachment=True,
             download_name=f"{filename_base}.docx",
             mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+    if fmt == "pdf":
+        outputs_dir = project_outputs_dir(project.id)
+        pdf_path = outputs_dir / f"{filename_base}.pdf"
+        text_to_pdf(content, pdf_path)
+        return send_file(
+            pdf_path,
+            as_attachment=True,
+            download_name=f"{filename_base}.pdf",
+            mimetype="application/pdf",
         )
 
     mimetype = "text/markdown" if fmt == "md" else "text/plain"

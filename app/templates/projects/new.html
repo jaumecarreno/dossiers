@@ -32,7 +32,7 @@
         <span>Idioma</span>
         <select name="language">
           {% for value, label in language_choices.items() %}
-            <option value="{{ value }}">{{ label }}</option>
+            <option value="{{ value }}" {% if value == "es" %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </label>

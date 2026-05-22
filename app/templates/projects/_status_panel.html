@@ -10,6 +10,10 @@
 
 {% set step_order = steps | map(attribute=0) | list %}
 
+{% if public_link_oob|default(false) %}
+  {% include "projects/_public_link_action.html" %}
+{% endif %}
+
 <div
   id="project-status"
   {% if project.status not in ["completed", "failed"] %}

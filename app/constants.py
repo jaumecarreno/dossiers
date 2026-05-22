@@ -2,10 +2,10 @@ from __future__ import annotations
 
 ALLOWED_EXTENSIONS = {"mp4", "mov", "m4v", "mp3", "wav", "m4a", "webm"}
 LANGUAGE_CHOICES = {
-    "auto": "Detectar automáticamente",
+    "ca": "Catalán",
+    "en": "Inglés",
     "es": "Español",
-    "ca": "Català",
-    "en": "English",
+    "auto": "Detectar automáticamente",
 }
 
 PROJECT_STATUSES = [
@@ -33,14 +33,6 @@ STATUS_LABELS = {
     "completed": "Completado",
     "failed": "Error",
 }
-
-LANGUAGE_CHOICES = {
-    "auto": "Detectar automáticamente",
-    "es": "Español",
-    "en": "Inglés",
-    "ca": "Catalán",
-}
-
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
