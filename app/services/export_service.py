@@ -35,11 +35,30 @@ def get_transcript_content(project, include_timestamps: bool = False) -> str:
             
         try:
             segments = json.loads(chunk.segments_json)
+            
+            current_paragraph_start = None
+            current_paragraph_text = []
+            
             for seg in segments:
                 start = offset + seg.get("start", 0)
                 text = seg.get("text", "").strip()
-                if text:
-                    lines.append(f"[{format_time(start)}] {text}")
+                if not text:
+                    continue
+                    
+                if current_paragraph_start is None:
+                    current_paragraph_start = start
+                    
+                current_paragraph_text.append(text)
+                
+                duration = start - current_paragraph_start
+                if (duration > 30.0 and text[-1] in ".!?。") or duration > 60.0:
+                    lines.append(f"[{format_time(current_paragraph_start)}] {' '.join(current_paragraph_text)}")
+                    current_paragraph_start = None
+                    current_paragraph_text = []
+                    
+            if current_paragraph_text:
+                lines.append(f"[{format_time(current_paragraph_start)}] {' '.join(current_paragraph_text)}")
+                
         except Exception:
             lines.append(chunk.transcript_text or "")
             
