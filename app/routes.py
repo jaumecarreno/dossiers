@@ -17,11 +17,15 @@ from flask import (
 from werkzeug.utils import secure_filename
 
 from app.constants import (
+    DEFAULT_TRANSCRIPTION_MODEL,
     LANGUAGE_CHOICES,
     STATUS_LABELS,
+    TRANSCRIPTION_MODEL_CHOICES,
     allowed_file,
+    get_transcription_model_label,
     get_project_progress,
     is_valid_language,
+    is_valid_transcription_model,
 )
 from app.extensions import db
 from app.models import Project, ProjectLog, ProjectOutput, TranscriptChunk, Template
@@ -61,7 +65,9 @@ def _template_context() -> dict:
     return {
         "templates": templates,
         "language_choices": LANGUAGE_CHOICES,
+        "transcription_model_choices": TRANSCRIPTION_MODEL_CHOICES,
         "status_labels": STATUS_LABELS,
+        "get_transcription_model_label": get_transcription_model_label,
         "get_project_progress": get_project_progress,
         "get_estimated_time": get_estimated_time,
     }
@@ -97,6 +103,7 @@ def create_project():
     client_name = (request.form.get("client_name") or "").strip() or None
     event_name = (request.form.get("event_name") or "").strip() or None
     language = request.form.get("language") or "es"
+    transcription_model = request.form.get("transcription_model") or DEFAULT_TRANSCRIPTION_MODEL
     template_id_str = request.form.get("template_id")
     upload = request.files.get("source_file")
     youtube_url = (request.form.get("youtube_url") or "").strip()
@@ -106,6 +113,9 @@ def create_project():
         return redirect(url_for("main.new_project"))
     if not is_valid_language(language):
         flash("Idioma no válido.", "error")
+        return redirect(url_for("main.new_project"))
+    if not is_valid_transcription_model(transcription_model):
+        flash("Modelo de transcripción no válido.", "error")
         return redirect(url_for("main.new_project"))
     if not template_id_str or not template_id_str.isdigit():
         flash("Plantilla no válida.", "error")
@@ -136,6 +146,7 @@ def create_project():
         source_filename=filename,
         source_file_path="",
         language=language,
+        transcription_model=transcription_model,
         template_id=template.id,
         status="uploaded",
         share_token=uuid.uuid4().hex,

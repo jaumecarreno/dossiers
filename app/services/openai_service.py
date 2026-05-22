@@ -30,27 +30,56 @@ def _text_response(system_prompt: str, user_prompt: str) -> str:
     return str(response).strip()
 
 
-def transcribe_audio(file_path: str, language: str | None = None) -> tuple[str, list[dict]]:
+def transcribe_audio(
+    file_path: str,
+    language: str | None = None,
+    model: str | None = None,
+    prompt: str | None = None,
+) -> tuple[str, list[dict]]:
     import openai
     with Path(file_path).open("rb") as audio_file:
+        selected_model = model or current_app.config["OPENAI_TRANSCRIPTION_MODEL"]
         kwargs = {
-            "model": current_app.config["OPENAI_TRANSCRIPTION_MODEL"],
+            "model": selected_model,
             "file": audio_file,
-            "response_format": "verbose_json",
         }
+        if selected_model == "whisper-1":
+            kwargs["response_format"] = "verbose_json"
         if language and language != "auto":
             kwargs["language"] = language
-            
-        try:
-            response = _client().audio.transcriptions.create(**kwargs)
-        except openai.BadRequestError as e:
-            if "unsupported_value" in str(e) or "verbose_json" in str(e):
-                # Fallback for models that don't support verbose_json (like gpt-4o-mini-transcribe)
-                kwargs.pop("response_format", None)
-                audio_file.seek(0)
+        if prompt:
+            kwargs["prompt"] = prompt
+
+        for _ in range(3):
+            try:
                 response = _client().audio.transcriptions.create(**kwargs)
-            else:
-                raise
+                break
+            except openai.BadRequestError as e:
+                message = str(e)
+                should_retry = False
+                if "response_format" in kwargs and (
+                    "unsupported_value" in message
+                    or "verbose_json" in message
+                    or "response_format" in message
+                ):
+                    # Fallback for models that don't support verbose_json.
+                    kwargs.pop("response_format", None)
+                    should_retry = True
+                if "prompt" in kwargs and "prompt" in message and (
+                    "unsupported" in message or "Unknown parameter" in message
+                ):
+                    kwargs.pop("prompt", None)
+                    should_retry = True
+                if "language" in kwargs and "language" in message and (
+                    "unsupported" in message or "Unknown parameter" in message
+                ):
+                    kwargs.pop("language", None)
+                    should_retry = True
+                if not should_retry:
+                    raise
+                audio_file.seek(0)
+        else:  # pragma: no cover - defensive loop guard
+            raise RuntimeError("No se pudo transcribir el audio con los parámetros disponibles.")
         
     text = getattr(response, "text", "")
     segments = getattr(response, "segments", [])

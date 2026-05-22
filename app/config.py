@@ -40,7 +40,7 @@ class Config:
 
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     OPENAI_TRANSCRIPTION_MODEL = os.getenv(
-        "OPENAI_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe"
+        "OPENAI_TRANSCRIPTION_MODEL", "gpt-4o-transcribe"
     )
     OPENAI_SUMMARY_MODEL = os.getenv("OPENAI_SUMMARY_MODEL", "gpt-5.4-mini")
 
