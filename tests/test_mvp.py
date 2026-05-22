@@ -17,9 +17,20 @@ from app.constants import (
 from app.models import Project, ProjectOutput, Template, TranscriptChunk
 from app.extensions import db
 from app.services.export_service import get_transcript_content, markdown_to_docx, text_to_pdf
-from app.services.media_service import AudioChunk, parse_silencedetect_output, plan_audio_chunks
+from app.services.media_service import (
+    AudioChunk,
+    CHUNK_OVERLAP_SECONDS,
+    normalize_audio,
+    parse_silencedetect_output,
+    plan_audio_chunks,
+)
 from app.services.openai_service import clean_transcript, transcribe_audio
-from app.tasks import _dedupe_overlap, process_project
+from app.tasks import (
+    _build_transcription_prompt,
+    _dedupe_overlap,
+    _extract_key_terms,
+    process_project,
+)
 
 
 def test_project_creation(client, app, monkeypatch):
@@ -402,13 +413,13 @@ def test_plan_audio_chunks_prefers_silences_inside_window():
         [(1000, 1203), (2390, 2406)],
     )
 
-    assert chunks == [(0.0, 1203), (1197, 2406), (2400, 3000)]
+    assert chunks == [(0.0, 1203), (1188, 2406), (2391, 3000)]
 
 
 def test_plan_audio_chunks_falls_back_to_safe_limit_without_silence():
     chunks = plan_audio_chunks(3000, [])
 
-    assert chunks == [(0.0, 1320), (1314, 2634), (2628, 3000)]
+    assert chunks == [(0.0, 1320.0), (1305.0, 2625.0), (2610.0, 3000)]
 
 
 def test_plan_audio_chunks_respects_size_limit_and_overlap():
@@ -419,7 +430,7 @@ def test_plan_audio_chunks_respects_size_limit_and_overlap():
         audio_bitrate_bps=64_000,
     )
 
-    assert chunks == [(0.0, 655), (649, 900)]
+    assert chunks == [(0.0, 655.0), (640.0, 900)]
 
 
 def test_dedupe_overlap_removes_repeated_overlap_text():
@@ -427,6 +438,88 @@ def test_dedupe_overlap_removes_repeated_overlap_text():
     current = "nombres propios repetidos con el cierre final"
 
     assert _dedupe_overlap(previous, current) == "con el cierre final"
+
+
+def test_chunk_overlap_increased_to_15():
+    assert CHUNK_OVERLAP_SECONDS == 15
+
+
+def test_dedupe_overlap_handles_longer_overlap():
+    previous = ("palabra " * 50).strip() + " final compartido entre chunks"
+    current = "final compartido entre chunks y aquí sigue el nuevo contenido"
+    result = _dedupe_overlap(previous, current)
+    assert result == "y aquí sigue el nuevo contenido"
+
+
+def test_normalize_audio_applies_correct_filters(monkeypatch):
+    commands: list[list[str]] = []
+
+    def fake_run(command):
+        commands.append(command)
+
+    monkeypatch.setattr("app.services.media_service._run", fake_run)
+
+    from pathlib import Path
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmpdir:
+        inp = Path(tmpdir) / "input.mp3"
+        out = Path(tmpdir) / "output.mp3"
+        inp.write_bytes(b"fake")
+        normalize_audio(inp, out)
+
+    assert len(commands) == 1
+    cmd = commands[0]
+    assert "-af" in cmd
+    af_value = cmd[cmd.index("-af") + 1]
+    assert "highpass=f=80" in af_value
+    assert "lowpass=f=8000" in af_value
+    assert "afftdn=nf=-20" in af_value
+    assert "loudnorm=I=-16:TP=-1.5:LRA=11" in af_value
+
+
+def test_extract_key_terms_finds_proper_nouns():
+    text = (
+        "María presentó el proyecto. Juan revisó los datos. "
+        "María y Juan colaboraron con Pedro. María mencionó a Pedro."
+    )
+    terms = _extract_key_terms(text)
+    assert "María" in terms
+    assert "Juan" in terms
+    assert "Pedro" in terms
+
+
+def test_extract_key_terms_filters_common_words():
+    text = "El gato. La casa. Los perros. En Madrid hay sol. Madrid es grande. Madrid tiene metro."
+    terms = _extract_key_terms(text)
+    assert "Madrid" in terms
+    assert "El" not in terms
+    assert "La" not in terms
+    assert "Los" not in terms
+    assert "En" not in terms
+
+
+def test_build_transcription_prompt_includes_key_terms(app):
+    with app.app_context():
+        project = Project(
+            title="Jornada Innovation",
+            client_name="Acme Corp",
+            event_name="Summit 2025",
+            source_filename="evento.mp3",
+            source_file_path="evento.mp3",
+            language="es",
+            status="transcribing",
+        )
+        previous = (
+            "Martínez explicó la estrategia. Luego García detalló el plan. "
+            "Martínez reafirmó la visión. García insistió en el calendario."
+        )
+        prompt = _build_transcription_prompt(project, previous)
+
+    assert "Vocabulario recurrente" in prompt
+    assert "Martínez" in prompt
+    assert "García" in prompt
+    assert "Jornada Innovation" in prompt
+    assert "Acme Corp" in prompt
 
 
 def test_process_project_uses_project_transcription_model(app, tmp_path, monkeypatch):
@@ -460,6 +553,7 @@ def test_process_project_uses_project_transcription_model(app, tmp_path, monkeyp
 
     monkeypatch.setattr("app.tasks.get_media_duration", lambda _path: 1800)
     monkeypatch.setattr("app.tasks.extract_audio", fake_extract_audio)
+    monkeypatch.setattr("app.tasks.normalize_audio", fake_extract_audio)
     monkeypatch.setattr("app.tasks.split_audio", fake_split_audio)
     monkeypatch.setattr("app.tasks.transcribe_audio", fake_transcribe_audio)
     monkeypatch.setattr("app.tasks.clean_transcript", lambda text, _language: text)
