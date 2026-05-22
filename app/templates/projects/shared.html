@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es" data-theme="light">
+<html lang="es" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -8,20 +8,28 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script>
+      (() => {
+        const savedTheme = localStorage.getItem("dossiers-theme");
+        document.documentElement.dataset.theme = savedTheme || "dark";
+      })();
+    </script>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
-      body { background-color: var(--bg-body); color: var(--text); padding: 2rem 1rem; }
-      .shared-container { max-width: 800px; margin: 0 auto; background: var(--bg-panel); border-radius: 12px; border: 1px solid var(--border); box-shadow: 0 10px 30px rgba(0,0,0,0.05); overflow: hidden; }
-      .shared-header { padding: 3rem 2rem; border-bottom: 1px solid var(--border); background: linear-gradient(to right, rgba(124, 92, 252, 0.05), rgba(79, 140, 255, 0.05)); text-align: center; }
+      body { background-color: var(--bg); color: var(--text); padding: 2rem 1rem; }
+      .shared-toolbar { max-width: 800px; margin: 0 auto 1rem; display: flex; justify-content: flex-end; }
+      .shared-container { max-width: 800px; margin: 0 auto; background: var(--panel); border-radius: 12px; border: 1px solid var(--line); box-shadow: var(--card-shadow); overflow: hidden; }
+      .shared-header { padding: 3rem 2rem; border-bottom: 1px solid var(--line); background: linear-gradient(to right, rgba(124, 92, 252, 0.08), rgba(79, 140, 255, 0.08)); text-align: center; }
       .shared-header h1 { font-size: 2.5rem; margin-bottom: 0.5rem; color: var(--text); }
-      .shared-header p { font-size: 1.1rem; color: var(--text-muted); }
+      .shared-header p { font-size: 1.1rem; color: var(--muted); }
       .shared-content { padding: 3rem 2rem; font-size: 1.05rem; line-height: 1.7; }
       .shared-content h1, .shared-content h2, .shared-content h3 { margin-top: 2rem; margin-bottom: 1rem; }
       .shared-content ul, .shared-content ol { padding-left: 1.5rem; margin-bottom: 1.5rem; }
       .shared-content p { margin-bottom: 1.5rem; }
-      .shared-footer { padding: 1.5rem 2rem; border-top: 1px solid var(--border); text-align: center; font-size: 0.9rem; color: var(--text-muted); background: var(--bg-body); }
+      .shared-footer { padding: 1.5rem 2rem; border-top: 1px solid var(--line); text-align: center; font-size: 0.9rem; color: var(--muted); background: var(--bg); }
       @media (max-width: 600px) {
+        body { padding: 1rem; }
         .shared-header { padding: 2rem 1.5rem; }
         .shared-content { padding: 2rem 1.5rem; }
         .shared-header h1 { font-size: 1.8rem; }
@@ -29,6 +37,12 @@
     </style>
   </head>
   <body>
+    <div class="shared-toolbar">
+      <button class="theme-toggle" type="button" id="theme-toggle" aria-label="Cambiar tema" title="Cambiar tema">
+        <svg class="theme-icon theme-icon-light" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        <svg class="theme-icon theme-icon-dark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
     <div class="shared-container">
       <header class="shared-header">
         <h1>{{ project.title }}</h1>
@@ -41,7 +55,7 @@
         {% if project.output and project.output.final_dossier_markdown %}
           {{ project.output.final_dossier_markdown }}
         {% else %}
-          <p style="text-align:center; color: var(--text-muted);">El dossier aún se está procesando o no está disponible.</p>
+          <p style="text-align:center; color: var(--muted);">El dossier aún se está procesando o no está disponible.</p>
         {% endif %}
       </div>
 
@@ -51,10 +65,31 @@
     </div>
 
     <script>
-      const rawText = document.getElementById("dossier-content").innerHTML;
-      if (rawText.trim() && !rawText.includes("El dossier aún se está procesando")) {
-        document.getElementById("dossier-content").innerHTML = marked.parse(rawText.trim());
-      }
+      (() => {
+        const root = document.documentElement;
+        const toggle = document.getElementById("theme-toggle");
+        const content = document.getElementById("dossier-content");
+        const rawText = content.innerHTML;
+
+        if (rawText.trim() && !rawText.includes("El dossier aún se está procesando")) {
+          content.innerHTML = marked.parse(rawText.trim());
+        }
+
+        const syncToggle = () => {
+          const isDark = root.dataset.theme === "dark";
+          toggle.setAttribute("aria-label", isDark ? "Cambiar a tema claro" : "Cambiar a tema oscuro");
+          toggle.setAttribute("title", isDark ? "Cambiar a tema claro" : "Cambiar a tema oscuro");
+        };
+
+        toggle.addEventListener("click", () => {
+          const nextTheme = root.dataset.theme === "dark" ? "light" : "dark";
+          root.dataset.theme = nextTheme;
+          localStorage.setItem("dossiers-theme", nextTheme);
+          syncToggle();
+        });
+
+        syncToggle();
+      })();
     </script>
   </body>
 </html>

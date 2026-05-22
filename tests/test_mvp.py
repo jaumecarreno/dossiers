@@ -127,6 +127,23 @@ def test_template_crud(app):
         assert Template.query.count() == 1
 
 
+def test_template_create_route(client, app):
+    response = client.get("/templates/new")
+    assert response.status_code == 200
+
+    response = client.post(
+        "/templates",
+        data={"name": "Plantilla ruta", "prompt_instructions": "- Sección"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/templates"
+    with app.app_context():
+        template = Template.query.filter_by(name="Plantilla ruta").one()
+        assert template.prompt_instructions == "- Sección"
+
+
 def test_status_flow_helpers():
     assert get_project_progress("uploaded") == 0
     assert get_project_progress("completed") == 100
@@ -205,6 +222,31 @@ def test_project_status_htmx_includes_public_link_oob_when_completed(client, app
     assert 'hx-swap-oob="true"' in html
     assert "Ver Enlace Público" in html
     assert "/p/token-htmx" in html
+
+
+def test_shared_dossier_supports_dark_theme_toggle(client, app):
+    with app.app_context():
+        project = Project(
+            title="Dossier público",
+            source_filename="evento.mp3",
+            source_file_path="evento.mp3",
+            language="es",
+            status="completed",
+            share_token="token-publico",
+        )
+        project.output = ProjectOutput(final_dossier_markdown="# Título público")
+        db.session.add(project)
+        db.session.commit()
+
+    response = client.get("/p/token-publico")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert '<html lang="es" data-theme="dark">' in html
+    assert 'localStorage.getItem("dossiers-theme")' in html
+    assert 'id="theme-toggle"' in html
+    assert "Cambiar a tema claro" in html
+    assert "localStorage.setItem(\"dossiers-theme\", nextTheme)" in html
 
 
 def test_markdown_to_docx_creates_file(tmp_path):
