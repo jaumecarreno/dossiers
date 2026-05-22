@@ -28,6 +28,93 @@
       .shared-content ul, .shared-content ol { padding-left: 1.5rem; margin-bottom: 1.5rem; }
       .shared-content p { margin-bottom: 1.5rem; }
       .shared-footer { padding: 1.5rem 2rem; border-top: 1px solid var(--line); text-align: center; font-size: 0.9rem; color: var(--muted); background: var(--bg); }
+      
+      /* Premium block aesthetics */
+      .dossier-block-container {
+        position: relative;
+        margin-bottom: 2.5rem;
+        padding: 1.25rem;
+        border-radius: 12px;
+        background: var(--panel-soft, rgba(255, 255, 255, 0.01));
+        border: 1px solid transparent;
+        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      .dossier-block-container:hover {
+        border-color: var(--line-soft, rgba(124, 92, 252, 0.2));
+        background: var(--bg-hover, rgba(124, 92, 252, 0.03));
+        box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.1);
+      }
+      .dossier-block-content {
+        color: var(--text);
+      }
+      .dossier-block-content p:last-child {
+        margin-bottom: 0;
+      }
+      .block-actions {
+        display: flex;
+        gap: 0.75rem;
+        margin-top: 1rem;
+        flex-wrap: wrap;
+      }
+      .block-action-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+        font-size: 0.85rem;
+        font-weight: 600;
+        border-radius: 30px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--text);
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      .block-action-btn:hover {
+        background: var(--bg-hover, rgba(124, 92, 252, 0.08));
+        border-color: var(--primary, #7c5cfc);
+        color: var(--primary, #7c5cfc);
+        transform: translateY(-1px);
+      }
+      .block-action-btn.play-btn.playing {
+        background: var(--primary, #7c5cfc);
+        border-color: var(--primary, #7c5cfc);
+        color: #ffffff;
+      }
+      .block-action-btn.transcript-btn.active {
+        background: rgba(79, 140, 255, 0.1);
+        border-color: #4f8cff;
+        color: #4f8cff;
+      }
+      .block-transcript-text {
+        margin-top: 1rem;
+        padding: 1.25rem;
+        border-radius: 8px;
+        background: rgba(124, 92, 252, 0.04);
+        border-left: 4px solid var(--primary, #7c5cfc);
+        font-size: 0.95rem;
+        color: var(--text);
+        animation: slideDown 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      .transcript-box-header {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--primary, #7c5cfc);
+        margin-bottom: 0.5rem;
+        font-weight: 700;
+      }
+      .transcript-box-content {
+        margin: 0;
+        line-height: 1.6;
+        font-style: italic;
+        color: var(--text);
+      }
+      @keyframes slideDown {
+        from { opacity: 0; transform: translateY(-8px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
       @media (max-width: 600px) {
         body { padding: 1rem; }
         .shared-header { padding: 2rem 1.5rem; }
@@ -51,7 +138,9 @@
         {% endif %}
       </header>
       
-      <div class="shared-content" id="dossier-content">
+      <div class="shared-content" id="dossier-content"
+           data-metadata='{{ project.output.paragraphs_metadata_json | safe if project.output and project.output.paragraphs_metadata_json else "[]" }}'
+           data-audio-url="{{ url_for('main.shared_dossier_audio', token=project.share_token) }}">
         {% if project.output and project.output.final_dossier_markdown %}
           {{ project.output.final_dossier_markdown }}
         {% else %}
@@ -71,9 +160,175 @@
         const content = document.getElementById("dossier-content");
         const rawText = content.innerHTML;
 
-        if (rawText.trim() && !rawText.includes("El dossier aún se está procesando")) {
-          content.innerHTML = marked.parse(rawText.trim());
-        }
+        const escapeHtml = (text) => {
+          if (!text) return "";
+          return text
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+        };
+
+        const renderDossier = () => {
+          if (!rawText.trim() || rawText.includes("El dossier aún se está procesando")) {
+            return;
+          }
+
+          let metadata = [];
+          try {
+            metadata = JSON.parse(content.dataset.metadata || "[]");
+          } catch (e) {
+            console.error("Error parsing paragraphs metadata:", e);
+          }
+
+          if (metadata && metadata.length > 0) {
+            content.innerHTML = "";
+            
+            metadata.forEach((item, index) => {
+              const blockDiv = document.createElement("div");
+              blockDiv.className = "dossier-block-container";
+              
+              const contentEl = document.createElement("div");
+              contentEl.className = "dossier-block-content";
+              contentEl.innerHTML = marked.parse(item.block_text);
+              blockDiv.appendChild(contentEl);
+              
+              if (item.start_seconds !== null && item.start_seconds !== undefined) {
+                const actionsDiv = document.createElement("div");
+                actionsDiv.className = "block-actions";
+                
+                // Play Button
+                const playBtn = document.createElement("button");
+                playBtn.type = "button";
+                playBtn.className = "block-action-btn play-btn";
+                playBtn.innerHTML = `
+                  <svg class="play-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                  </svg>
+                  <span class="btn-text">Escuchar clip</span>
+                `;
+                playBtn.dataset.start = item.start_seconds;
+                playBtn.dataset.end = item.end_seconds;
+                actionsDiv.appendChild(playBtn);
+                
+                // Transcript Button
+                const transcriptBtn = document.createElement("button");
+                transcriptBtn.type = "button";
+                transcriptBtn.className = "block-action-btn transcript-btn";
+                transcriptBtn.innerHTML = `
+                  <svg class="transcript-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                  <span class="btn-text">Ver transcripción</span>
+                `;
+                actionsDiv.appendChild(transcriptBtn);
+                
+                blockDiv.appendChild(actionsDiv);
+                
+                // Transcript text
+                const transcriptTextDiv = document.createElement("div");
+                transcriptTextDiv.className = "block-transcript-text";
+                transcriptTextDiv.style.display = "none";
+                transcriptTextDiv.innerHTML = `
+                  <div class="transcript-box-header">Transcripción original de la idea</div>
+                  <p class="transcript-box-content">${escapeHtml(item.original_transcript)}</p>
+                `;
+                blockDiv.appendChild(transcriptTextDiv);
+              }
+              
+              content.appendChild(blockDiv);
+            });
+
+            setupInteractions();
+          } else {
+            content.innerHTML = marked.parse(rawText.trim());
+          }
+        };
+
+        let audioPlayer = null;
+        let activePlayBtn = null;
+        let stopTime = 0;
+
+        const resetPlayButtons = () => {
+          document.querySelectorAll(".play-btn").forEach(btn => {
+            btn.classList.remove("playing");
+            btn.querySelector(".btn-text").textContent = "Escuchar clip";
+            btn.querySelector("svg").innerHTML = `
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            `;
+          });
+        };
+
+        const setupInteractions = () => {
+          document.querySelectorAll(".play-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+              const start = parseFloat(btn.dataset.start);
+              const end = parseFloat(btn.dataset.end);
+              const audioUrl = content.dataset.audioUrl;
+
+              if (!audioPlayer) {
+                audioPlayer = new Audio(audioUrl);
+                audioPlayer.addEventListener("timeupdate", () => {
+                  if (audioPlayer.currentTime >= stopTime) {
+                    audioPlayer.pause();
+                    resetPlayButtons();
+                    activePlayBtn = null;
+                  }
+                });
+                audioPlayer.addEventListener("pause", () => {
+                  resetPlayButtons();
+                  activePlayBtn = null;
+                });
+              }
+
+              if (activePlayBtn === btn) {
+                if (!audioPlayer.paused) {
+                  audioPlayer.pause();
+                } else {
+                  audioPlayer.play().catch(err => console.error("Play error:", err));
+                  btn.classList.add("playing");
+                  btn.querySelector(".btn-text").textContent = "Pausar clip";
+                  btn.querySelector("svg").innerHTML = `
+                    <rect x="6" y="4" width="4" height="16"></rect>
+                    <rect x="14" y="4" width="4" height="16"></rect>
+                  `;
+                }
+                return;
+              }
+
+              resetPlayButtons();
+              activePlayBtn = btn;
+              stopTime = end;
+
+              btn.classList.add("playing");
+              btn.querySelector(".btn-text").textContent = "Pausar clip";
+              btn.querySelector("svg").innerHTML = `
+                <rect x="6" y="4" width="4" height="16"></rect>
+                <rect x="14" y="4" width="4" height="16"></rect>
+              `;
+
+              audioPlayer.currentTime = start;
+              audioPlayer.play().catch(err => {
+                console.error("Play error:", err);
+                resetPlayButtons();
+                activePlayBtn = null;
+              });
+            });
+          });
+
+          document.querySelectorAll(".transcript-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+              const block = btn.closest(".dossier-block-container");
+              const textDiv = block.querySelector(".block-transcript-text");
+              const isHidden = textDiv.style.display === "none";
+
+              textDiv.style.display = isHidden ? "block" : "none";
+              btn.classList.toggle("active", isHidden);
+              btn.querySelector(".btn-text").textContent = isHidden ? "Ocultar transcripción" : "Ver transcripción";
+            });
+          });
+        };
 
         const syncToggle = () => {
           const isDark = root.dataset.theme === "dark";
@@ -88,6 +343,7 @@
           syncToggle();
         });
 
+        renderDossier();
         syncToggle();
       })();
     </script>

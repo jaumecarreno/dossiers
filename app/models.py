@@ -98,6 +98,7 @@ class ProjectOutput(TimestampMixin, db.Model):
     block_summary = db.Column(db.Text, nullable=True)
     final_dossier_markdown = db.Column(db.Text, nullable=True)
     final_dossier_docx_path = db.Column(db.String(1024), nullable=True)
+    paragraphs_metadata_json = db.Column(db.Text, nullable=True)
 
     project = db.relationship("Project", back_populates="output")
 

@@ -128,3 +128,41 @@ Resúmenes parciales:
 
 {block_summary}"""
     return _text_response(prompt, user_prompt)
+
+
+def clean_json_response(text: str) -> str:
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
+def align_dossier_blocks_service(blocks: list[str], timestamped_transcript: str, language: str) -> str:
+    system_prompt = """Eres un asistente de edición profesional. Tu tarea es alinear los bloques del dossier final con la transcripción original (que tiene marcas de tiempo).
+Asocia cada bloque del dossier con el fragmento del audio donde se habla de esa idea.
+
+Reglas importantes:
+1. Para cada bloque, identifica el inicio y fin exactos en segundos en el audio original.
+2. El fragmento del audio seleccionado para cada bloque debe durar preferiblemente entre 15 y 45 segundos. Busca el intervalo más representativo que explique ese bloque.
+3. Extrae la transcripción original limpia (sin marcas de tiempo) correspondiente a esa sección de la transcripción.
+4. Devuelve un array JSON en el mismo orden que los bloques recibidos. Cada elemento debe ser un objeto con:
+   - "block_text": El texto exacto del bloque del dossier.
+   - "start_seconds": El segundo de inicio en el audio (ej. 125) o null si es un título/sección/tabla que no corresponde a una idea concreta del audio.
+   - "end_seconds": El segundo de fin en el audio (ej. 165) o null.
+   - "original_transcript": La transcripción exacta del audio original correspondiente a esta sección o null.
+
+Devuelve únicamente el array JSON, sin bloques de código ni explicaciones."""
+
+    blocks_formatted = "\n\n".join([f"--- BLOQUE {i+1} ---\n{block}" for i, block in enumerate(blocks)])
+    user_prompt = f"""Transcripción original con tiempos:
+{timestamped_transcript}
+
+Bloques del dossier a alinear:
+{blocks_formatted}"""
+
+    return _text_response(system_prompt, user_prompt)

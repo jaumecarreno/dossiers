@@ -671,3 +671,150 @@ def test_openai_service_keeps_verbose_json_for_whisper(app, tmp_path, monkeypatc
             "Transcripcion whisper",
             [{"start": 0.0, "end": 2.0, "text": "Transcripcion whisper"}],
         )
+
+
+def test_align_dossier_blocks_service(app, monkeypatch):
+    class FakeTextResponse:
+        output_text = '[{"block_text": "Párrafo 1", "start_seconds": 10, "end_seconds": 30, "original_transcript": "Transcripción 1"}]'
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            return FakeTextResponse()
+
+    class FakeClient:
+        responses = FakeResponses()
+
+    monkeypatch.setattr("app.services.openai_service._client", lambda: FakeClient())
+
+    from app.services.openai_service import align_dossier_blocks_service
+    with app.app_context():
+        res = align_dossier_blocks_service(["Párrafo 1"], "Transcripción con tiempos", "es")
+        assert "Párrafo 1" in res
+        assert "start_seconds" in res
+
+
+def test_shared_dossier_audio_route(client, app, monkeypatch):
+    with app.app_context():
+        project = Project(
+            title="Proyecto con audio",
+            source_filename="video.mp4",
+            source_file_path="video.mp4",
+            language="es",
+            status="completed",
+            share_token="my-share-token",
+        )
+        db.session.add(project)
+        db.session.commit()
+        project_id = project.id
+
+        # Create dummy audio file in the project's audio folder
+        from app.storage import project_audio_dir
+        audio_dir = project_audio_dir(project_id)
+        audio_file = audio_dir / "audio.mp3"
+        audio_file.write_bytes(b"dummy mp3 data")
+
+    # Access without valid token should return 404
+    response = client.get("/p/non-existent-token/audio")
+    assert response.status_code == 404
+
+    # Access with valid token should return the file
+    response = client.get("/p/my-share-token/audio")
+    assert response.status_code == 200
+    assert response.data == b"dummy mp3 data"
+    assert response.headers["Content-Type"] == "audio/mpeg"
+
+
+def test_ensure_paragraphs_metadata(app, monkeypatch):
+    calls = []
+
+    def mock_align_service(blocks, transcript, lang):
+        calls.append((blocks, transcript, lang))
+        return '[{"block_text": "Párrafo 1", "start_seconds": 10, "end_seconds": 30, "original_transcript": "Transcripción 1"}]'
+
+    monkeypatch.setattr("app.routes.align_dossier_blocks_service", mock_align_service)
+
+    with app.app_context():
+        project = Project(
+            title="Proyecto Lazy Alignment",
+            source_filename="video.mp4",
+            source_file_path="video.mp4",
+            language="es",
+            status="completed",
+            share_token="lazy-token",
+        )
+        project.output = ProjectOutput(
+            final_dossier_markdown="Párrafo 1",
+            full_transcript="Transcripción 1",
+        )
+        db.session.add(project)
+        db.session.commit()
+
+        from app.routes import ensure_paragraphs_metadata
+        res = ensure_paragraphs_metadata(project)
+        assert res is not None
+        assert "Párrafo 1" in res
+        assert project.output.paragraphs_metadata_json == res
+        assert len(calls) == 1
+
+        # Second call should use cached value and not call the service again
+        res2 = ensure_paragraphs_metadata(project)
+        assert res2 == res
+        assert len(calls) == 1
+
+
+def test_pipeline_includes_alignment(app, tmp_path, monkeypatch):
+    def fake_extract_audio(_source_path, output_path):
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"audio")
+        return path
+
+    def fake_split_audio(_audio_path, output_dir, _chunk_minutes):
+        output = Path(output_dir)
+        return [AudioChunk(output / "chunk_001.mp3", 0, 100)]
+
+    def fake_transcribe_audio(file_path, language, model=None, prompt=None):
+        return "Transcripción del audio de la ponencia.", [{"start": 0.0, "end": 10.0, "text": "Transcripción del audio de la ponencia."}]
+
+    def fake_align_service(blocks, transcript, lang):
+        return '[{"block_text": "# Dossier", "start_seconds": 0, "end_seconds": 10, "original_transcript": "Transcripción del audio de la ponencia."}]'
+
+    monkeypatch.setattr("app.tasks.get_media_duration", lambda _path: 100)
+    monkeypatch.setattr("app.tasks.extract_audio", fake_extract_audio)
+    monkeypatch.setattr("app.tasks.normalize_audio", fake_extract_audio)
+    monkeypatch.setattr("app.tasks.split_audio", fake_split_audio)
+    monkeypatch.setattr("app.tasks.transcribe_audio", fake_transcribe_audio)
+    monkeypatch.setattr("app.tasks.clean_transcript", lambda text, _language: text)
+    monkeypatch.setattr("app.tasks.summarize_chunk", lambda text, _language: "Resumen")
+    monkeypatch.setattr("app.tasks.generate_final_dossier", lambda *_args: "# Dossier")
+    monkeypatch.setattr("app.tasks.align_dossier_blocks_service", fake_align_service)
+    monkeypatch.setattr(
+        "app.tasks.markdown_to_docx",
+        lambda _markdown, output_path: Path(output_path).write_bytes(b"docx"),
+    )
+
+    with app.app_context():
+        source_path = tmp_path / "source.mp4"
+        source_path.write_bytes(b"video")
+        template = Template(name="Plantilla", prompt_instructions="- Seccion")
+        project = Project(
+            title="Jornada para alinear",
+            source_filename=source_path.name,
+            source_file_path=str(source_path),
+            language="es",
+            template=template,
+            status="queued",
+        )
+        db.session.add(project)
+        db.session.commit()
+        project_id = project.id
+
+        process_project(project_id)
+
+        project = Project.query.get(project_id)
+        assert project.status == "completed"
+        assert project.output.paragraphs_metadata_json is not None
+        metadata = json.loads(project.output.paragraphs_metadata_json)
+        assert metadata[0]["start_seconds"] == 0
+        assert "Transcripción del audio" in metadata[0]["original_transcript"]
+

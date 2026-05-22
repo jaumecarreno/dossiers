@@ -10,9 +10,11 @@ from flask import current_app, has_app_context
 from app.constants import DEFAULT_TRANSCRIPTION_MODEL, LANGUAGE_CHOICES
 from app.extensions import db
 from app.models import Project, ProjectLog, ProjectOutput, TranscriptChunk
-from app.services.export_service import markdown_to_docx
+from app.services.export_service import get_transcript_content, markdown_to_docx
 from app.services.media_service import extract_audio, get_media_duration, normalize_audio, split_audio
 from app.services.openai_service import (
+    align_dossier_blocks_service,
+    clean_json_response,
     clean_transcript,
     generate_final_dossier,
     summarize_chunk,
@@ -247,7 +249,32 @@ def _process_project(project_id: int) -> None:
                 output.block_summary or "",
             )
             db.session.commit()
-            
+
+        if not output.paragraphs_metadata_json:
+            _set_status(project, "aligning_dossier", "Alineando bloques del dossier con el audio.")
+            try:
+                timestamped_transcript = get_transcript_content(project, include_timestamps=True)
+                blocks = [b.strip() for b in (output.final_dossier_markdown or "").split("\n\n") if b.strip()]
+                if blocks:
+                    metadata_raw = align_dossier_blocks_service(
+                        blocks,
+                        timestamped_transcript,
+                        project.language,
+                    )
+                    metadata_clean = clean_json_response(metadata_raw)
+                    # Validate JSON
+                    json.loads(metadata_clean)
+                    output.paragraphs_metadata_json = metadata_clean
+            except Exception as exc:
+                db.session.add(
+                    ProjectLog(
+                        project_id=project.id,
+                        level="warning",
+                        message=f"No se pudo alinear el dossier: {exc}",
+                    )
+                )
+            db.session.commit()
+
         outputs_dir = project_outputs_dir(project.id)
         markdown_path = outputs_dir / "dossier.md"
         markdown_path.write_text(output.final_dossier_markdown or "", encoding="utf-8")

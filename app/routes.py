@@ -33,7 +33,10 @@ from app.models import Project, ProjectLog, ProjectOutput, TranscriptChunk, Temp
 from app.queue import enqueue_project_processing
 from app.services.export_service import get_transcript_content, markdown_to_docx, text_to_pdf
 from app.services.media_service import download_youtube_media, is_youtube_url
-from app.storage import clear_generated_files, project_original_dir, project_root, project_outputs_dir
+from app.storage import clear_generated_files, project_original_dir, project_root, project_outputs_dir, project_audio_dir
+from app.services.openai_service import align_dossier_blocks_service, clean_json_response
+import json
+from flask import current_app
 
 bp = Blueprint("main", __name__)
 
@@ -328,10 +331,52 @@ def delete_project(project_id: int):
     return redirect(url_for("main.dashboard"))
 
 
+def ensure_paragraphs_metadata(project) -> str | None:
+    if not project.output or not project.output.final_dossier_markdown:
+        return None
+    if project.output.paragraphs_metadata_json:
+        return project.output.paragraphs_metadata_json
+
+    try:
+        timestamped_transcript = get_transcript_content(project, include_timestamps=True)
+        blocks = [b.strip() for b in (project.output.final_dossier_markdown or "").split("\n\n") if b.strip()]
+        if not blocks:
+            return None
+
+        metadata_raw = align_dossier_blocks_service(
+            blocks,
+            timestamped_transcript,
+            project.language,
+        )
+        metadata_clean = clean_json_response(metadata_raw)
+        # Validate JSON
+        json.loads(metadata_clean)
+        project.output.paragraphs_metadata_json = metadata_clean
+        db.session.commit()
+        return metadata_clean
+    except Exception as e:
+        current_app.logger.warning(f"Failed to align dossier on-the-fly: {e}")
+        return None
+
+
 @bp.get("/p/<token>")
 def shared_dossier(token: str):
     project = Project.query.filter_by(share_token=token).first_or_404()
+    ensure_paragraphs_metadata(project)
     return render_template("projects/shared.html", project=project)
+
+
+@bp.get("/p/<token>/audio")
+def shared_dossier_audio(token: str):
+    project = Project.query.filter_by(share_token=token).first_or_404()
+    audio_path = project_audio_dir(project.id) / "audio.mp3"
+    if not audio_path.exists():
+        abort(404)
+    return send_file(
+        audio_path,
+        mimetype="audio/mpeg",
+        conditional=True,
+    )
 
 # TEMPLATES CRUD
 # ==============================================================================
