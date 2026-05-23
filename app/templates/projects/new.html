@@ -36,7 +36,7 @@
           {% endfor %}
         </select>
       </label>
-      <label>
+      <label id="transcription-model-field">
         <span>Modelo de transcripción</span>
         <select name="transcription_model">
           {% for value, option in transcription_model_choices.items() %}
@@ -64,28 +64,59 @@
     </div>
 
     <div>
-      <span style="display:block; margin-bottom:0.4rem; color:var(--text-secondary); font-size:0.85rem; font-weight:600;">Archivo de vídeo o audio</span>
-      <div class="drop-zone" id="drop-zone">
-        <input type="file" name="source_file" id="source-file" accept=".mp4,.mov,.m4v,.mp3,.wav,.m4a,.webm" />
-        <div class="drop-zone-icon">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
-        </div>
-        <p class="drop-zone-text"><strong>Arrastra tu archivo aquí</strong> o haz clic para seleccionar</p>
-        <p class="drop-zone-hint">MP4, MOV, MP3, WAV, M4A, WEBM — máx. 10 GB</p>
-      </div>
-      <div class="file-preview" id="file-preview">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><path d="M14 2v6h6"/></svg>
-        <span class="file-preview-name" id="file-name"></span>
-        <span class="file-preview-size" id="file-size"></span>
-        <button type="button" class="file-preview-remove" id="file-remove" title="Quitar archivo">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-        </button>
+      <span style="display:block; margin-bottom:0.4rem; color:var(--text-secondary); font-size:0.85rem; font-weight:600;">Origen</span>
+      <div class="source-mode-group" role="radiogroup" aria-label="Origen del proyecto">
+        <label class="source-mode-option">
+          <input type="radio" name="source_mode" value="media" checked />
+          <span>Audio, vídeo o YouTube</span>
+        </label>
+        <label class="source-mode-option">
+          <input type="radio" name="source_mode" value="transcript_files" />
+          <span>Transcripciones ya hechas</span>
+        </label>
       </div>
     </div>
-    <label>
-      <span>O enlace de YouTube</span>
-      <input type="url" name="youtube_url" id="youtube-url" placeholder="https://www.youtube.com/watch?v=..." />
-    </label>
+
+    <div id="media-source-fields" class="source-fields">
+      <div>
+        <span style="display:block; margin-bottom:0.4rem; color:var(--text-secondary); font-size:0.85rem; font-weight:600;">Archivo de vídeo o audio</span>
+        <div class="drop-zone" id="drop-zone">
+          <input type="file" name="source_file" id="source-file" accept=".mp4,.mov,.m4v,.mp3,.wav,.m4a,.webm" />
+          <div class="drop-zone-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+          </div>
+          <p class="drop-zone-text"><strong>Arrastra tu archivo aquí</strong> o haz clic para seleccionar</p>
+          <p class="drop-zone-hint">MP4, MOV, MP3, WAV, M4A, WEBM — máx. 10 GB</p>
+        </div>
+        <div class="file-preview" id="file-preview">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><path d="M14 2v6h6"/></svg>
+          <span class="file-preview-name" id="file-name"></span>
+          <span class="file-preview-size" id="file-size"></span>
+          <button type="button" class="file-preview-remove" id="file-remove" title="Quitar archivo">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </div>
+      <label>
+        <span>O enlace de YouTube</span>
+        <input type="url" name="youtube_url" id="youtube-url" placeholder="https://www.youtube.com/watch?v=..." />
+      </label>
+    </div>
+
+    <div id="transcript-source-fields" class="source-fields" hidden>
+      <div>
+        <span style="display:block; margin-bottom:0.4rem; color:var(--text-secondary); font-size:0.85rem; font-weight:600;">Archivos de transcripción</span>
+        <div class="drop-zone" id="transcript-drop-zone">
+          <input type="file" name="transcript_files" id="transcript-files" accept=".txt,.md,.docx,.srt,.vtt" multiple />
+          <div class="drop-zone-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><path d="M14 2v6h6"/><path d="M16 13H8M16 17H8M10 9H8"/></svg>
+          </div>
+          <p class="drop-zone-text"><strong>Sube las partes en orden</strong> o reordénalas abajo</p>
+          <p class="drop-zone-hint">TXT, MD, DOCX, SRT, VTT</p>
+        </div>
+        <ol class="transcript-file-list" id="transcript-file-list"></ol>
+      </div>
+    </div>
 
     <div class="form-actions">
       <a class="button" href="{{ url_for('main.dashboard') }}">
@@ -102,30 +133,38 @@
   <div class="upload-overlay" id="upload-overlay">
     <div class="upload-overlay-content">
       <div class="upload-spinner"></div>
-      <h3>Subiendo archivo…</h3>
+      <h3>Subiendo archivos...</h3>
       <p class="muted">Esto puede tardar unos minutos para archivos grandes.</p>
     </div>
   </div>
 
   <script>
     (() => {
+      const form = document.getElementById("create-form");
+      const sourceModeInputs = [...form.querySelectorAll('input[name="source_mode"]')];
+      const mediaSourceFields = document.getElementById("media-source-fields");
+      const transcriptSourceFields = document.getElementById("transcript-source-fields");
+      const transcriptionModelField = document.getElementById("transcription-model-field");
       const dropZone = document.getElementById("drop-zone");
       const fileInput = document.getElementById("source-file");
       const preview = document.getElementById("file-preview");
       const fileName = document.getElementById("file-name");
       const fileSize = document.getElementById("file-size");
       const fileRemove = document.getElementById("file-remove");
-      const form = document.getElementById("create-form");
       const overlay = document.getElementById("upload-overlay");
       const submitBtn = document.getElementById("submit-btn");
       const youtubeInput = document.getElementById("youtube-url");
       const transcriptionModel = form.elements.transcription_model;
       const costValue = document.getElementById("transcription-cost-value");
       const costDetail = document.getElementById("transcription-cost-detail");
+      const transcriptInput = document.getElementById("transcript-files");
+      const transcriptDropZone = document.getElementById("transcript-drop-zone");
+      const transcriptFileList = document.getElementById("transcript-file-list");
       const transcriptionCosts = {{ transcription_model_costs_usd_per_minute|tojson }};
       const transcriptionChoices = {{ transcription_model_choices|tojson }};
       let mediaDurationSeconds = null;
       let durationRequestId = 0;
+      let transcriptFiles = [];
 
       function formatSize(bytes) {
         if (bytes < 1024) return bytes + " B";
@@ -154,8 +193,18 @@
         return choice ? choice.label : transcriptionModel.value;
       }
 
+      function currentSourceMode() {
+        const selected = sourceModeInputs.find(input => input.checked);
+        return selected ? selected.value : "media";
+      }
+
       function updateCostEstimate(message) {
         const rate = transcriptionCosts[transcriptionModel.value];
+        if (currentSourceMode() === "transcript_files") {
+          costValue.textContent = "No aplica";
+          costDetail.textContent = "Las transcripciones ya estan hechas; solo se limpiara y generara el dossier.";
+          return;
+        }
         if (message) {
           costValue.textContent = message;
           costDetail.textContent = "Solo transcripción; no incluye limpieza, resumen ni dossier.";
@@ -176,6 +225,14 @@
         costDetail.textContent = `${formatDuration(mediaDurationSeconds)} con ${selectedModelLabel()}. Solo transcripción.`;
       }
 
+      function updateSourceMode() {
+        const transcriptMode = currentSourceMode() === "transcript_files";
+        mediaSourceFields.hidden = transcriptMode;
+        transcriptSourceFields.hidden = !transcriptMode;
+        transcriptionModelField.hidden = transcriptMode;
+        updateCostEstimate();
+      }
+
       function isVideoFile(file) {
         const name = file.name.toLowerCase();
         return file.type.startsWith("video/") || [".mp4", ".mov", ".m4v", ".webm"].some(ext => name.endsWith(ext));
@@ -184,7 +241,7 @@
       function readMediaDuration(file) {
         const requestId = ++durationRequestId;
         mediaDurationSeconds = null;
-        updateCostEstimate("Leyendo duración…");
+        updateCostEstimate("Leyendo duración...");
 
         const media = document.createElement(isVideoFile(file) ? "video" : "audio");
         const url = URL.createObjectURL(file);
@@ -221,6 +278,45 @@
         updateCostEstimate();
       }
 
+      function syncTranscriptInput() {
+        const transfer = new DataTransfer();
+        transcriptFiles.forEach(file => transfer.items.add(file));
+        transcriptInput.files = transfer.files;
+      }
+
+      function renderTranscriptFiles() {
+        transcriptFileList.innerHTML = "";
+        transcriptFiles.forEach((file, index) => {
+          const item = document.createElement("li");
+          item.className = "transcript-file-item";
+          item.innerHTML = `
+            <span class="transcript-file-index">${index + 1}</span>
+            <span class="transcript-file-name">${file.name}</span>
+            <span class="transcript-file-size">${formatSize(file.size)}</span>
+            <button type="button" class="icon-button" data-action="up" title="Subir" ${index === 0 ? "disabled" : ""}>↑</button>
+            <button type="button" class="icon-button" data-action="down" title="Bajar" ${index === transcriptFiles.length - 1 ? "disabled" : ""}>↓</button>
+            <button type="button" class="icon-button icon-button-danger" data-action="remove" title="Quitar">×</button>
+          `;
+          item.querySelectorAll("button").forEach(button => {
+            button.addEventListener("click", () => {
+              const action = button.dataset.action;
+              if (action === "remove") transcriptFiles.splice(index, 1);
+              if (action === "up" && index > 0) [transcriptFiles[index - 1], transcriptFiles[index]] = [transcriptFiles[index], transcriptFiles[index - 1]];
+              if (action === "down" && index < transcriptFiles.length - 1) [transcriptFiles[index + 1], transcriptFiles[index]] = [transcriptFiles[index], transcriptFiles[index + 1]];
+              syncTranscriptInput();
+              renderTranscriptFiles();
+            });
+          });
+          transcriptFileList.appendChild(item);
+        });
+      }
+
+      function addTranscriptFiles(files) {
+        transcriptFiles = transcriptFiles.concat(Array.from(files));
+        syncTranscriptInput();
+        renderTranscriptFiles();
+      }
+
       fileInput.addEventListener("change", () => {
         if (fileInput.files.length) showPreview(fileInput.files[0]);
         else clearPreview();
@@ -231,13 +327,19 @@
       youtubeInput.addEventListener("input", () => {
         if (!fileInput.files.length) updateCostEstimate();
       });
+      sourceModeInputs.forEach(input => input.addEventListener("change", updateSourceMode));
+      transcriptInput.addEventListener("change", () => {
+        if (transcriptInput.files.length) addTranscriptFiles(transcriptInput.files);
+      });
 
       ["dragenter", "dragover"].forEach(evt => {
         dropZone.addEventListener(evt, e => { e.preventDefault(); dropZone.classList.add("dragover"); });
+        transcriptDropZone.addEventListener(evt, e => { e.preventDefault(); transcriptDropZone.classList.add("dragover"); });
       });
 
       ["dragleave", "drop"].forEach(evt => {
         dropZone.addEventListener(evt, e => { e.preventDefault(); dropZone.classList.remove("dragover"); });
+        transcriptDropZone.addEventListener(evt, e => { e.preventDefault(); transcriptDropZone.classList.remove("dragover"); });
       });
 
       dropZone.addEventListener("drop", e => {
@@ -248,12 +350,24 @@
         }
       });
 
-      updateCostEstimate();
+      transcriptDropZone.addEventListener("drop", e => {
+        if (e.dataTransfer.files.length) addTranscriptFiles(e.dataTransfer.files);
+      });
+
+      updateSourceMode();
 
       form.addEventListener("submit", (e) => {
+        const transcriptMode = currentSourceMode() === "transcript_files";
         const hasFile = fileInput.files.length > 0;
         const hasYoutube = (youtubeInput.value || "").trim().length > 0;
-        if (!hasFile && !hasYoutube) {
+        const hasTranscriptFiles = transcriptInput.files.length > 0;
+        if (transcriptMode && !hasTranscriptFiles) {
+          e.preventDefault();
+          alert("Sube al menos un archivo de transcripción.");
+          submitBtn.disabled = false;
+          return;
+        }
+        if (!transcriptMode && !hasFile && !hasYoutube) {
           e.preventDefault();
           alert("Selecciona un archivo o indica un enlace de YouTube.");
           submitBtn.disabled = false;

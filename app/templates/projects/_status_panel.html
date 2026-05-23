@@ -1,12 +1,22 @@
-{% set steps = [
-  ("extracting_audio", "Extraer audio"),
-  ("splitting_audio", "Dividir"),
-  ("transcribing", "Transcribir"),
-  ("cleaning_transcript", "Limpiar"),
-  ("summarizing", "Resumir"),
-  ("generating_dossier", "Generar"),
-  ("completed", "Listo"),
-] %}
+{% if project.source_kind == "transcript_files" %}
+  {% set steps = [
+    ("importing_transcript", "Importar"),
+    ("cleaning_transcript", "Limpiar"),
+    ("summarizing", "Resumir"),
+    ("generating_dossier", "Generar"),
+    ("completed", "Listo"),
+  ] %}
+{% else %}
+  {% set steps = [
+    ("extracting_audio", "Extraer audio"),
+    ("splitting_audio", "Dividir"),
+    ("transcribing", "Transcribir"),
+    ("cleaning_transcript", "Limpiar"),
+    ("summarizing", "Resumir"),
+    ("generating_dossier", "Generar"),
+    ("completed", "Listo"),
+  ] %}
+{% endif %}
 
 {% set step_order = steps | map(attribute=0) | list %}
 
@@ -52,7 +62,6 @@
       </div>
     </div>
 
-    {# Stepper #}
     <ol class="stepper">
       {% for step_key, step_label in steps %}
         {% if project.status == "failed" and step_key == project.status %}
@@ -64,7 +73,6 @@
         {% elif project.status == "completed" %}
           <li class="stepper-step done">
         {% elif project.status == "failed" and step_key in step_order and project.status not in step_order %}
-          {# status is failed but we need to figure out which steps were done #}
           <li class="stepper-step">
         {% else %}
           <li class="stepper-step">
@@ -89,7 +97,7 @@
 
     <div class="meta-grid">
       <div>
-        <span>Archivo</span>
+        <span>{% if project.source_kind == "transcript_files" %}Archivos{% else %}Archivo{% endif %}</span>
         <strong>{{ project.source_filename }}</strong>
       </div>
       <div>
@@ -98,7 +106,7 @@
       </div>
       <div>
         <span>Modelo</span>
-        <strong>{{ get_transcription_model_label(project.transcription_model) }}</strong>
+        <strong>{% if project.source_kind == "transcript_files" %}No aplica{% else %}{{ get_transcription_model_label(project.transcription_model) }}{% endif %}</strong>
       </div>
       <div>
         <span>Plantilla</span>
@@ -106,7 +114,7 @@
       </div>
       <div>
         <span>Duración</span>
-        <strong>{% if project.duration_seconds %}{{ (project.duration_seconds // 60) }} min{% else %}—{% endif %}</strong>
+        <strong>{% if project.source_kind == "transcript_files" %}No aplica{% elif project.duration_seconds %}{{ (project.duration_seconds // 60) }} min{% else %}—{% endif %}</strong>
       </div>
     </div>
   </section>

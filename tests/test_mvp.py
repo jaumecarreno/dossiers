@@ -8,9 +8,11 @@ from app.constants import (
     DEFAULT_TRANSCRIPTION_MODEL,
     LANGUAGE_CHOICES,
     PROJECT_STATUSES,
+    SOURCE_KIND_TRANSCRIPT_FILES,
     TRANSCRIPTION_MODEL_COSTS_USD_PER_MINUTE,
     TRANSCRIPTION_MODEL_CHOICES,
     allowed_file,
+    allowed_transcript_file,
     estimate_transcription_cost_usd,
     get_project_progress,
 )
@@ -25,6 +27,7 @@ from app.services.media_service import (
     plan_audio_chunks,
 )
 from app.services.openai_service import clean_transcript, transcribe_audio
+from app.services.transcript_import_service import extract_transcript_text
 from app.tasks import (
     _build_transcription_prompt,
     _dedupe_overlap,
@@ -116,12 +119,71 @@ def test_project_creation_from_youtube_url(client, app, tmp_path, monkeypatch):
         assert enqueued == [project.id]
 
 
+def test_project_creation_from_transcript_files(client, app, monkeypatch):
+    enqueued: list[int] = []
+
+    def fake_enqueue(project_id: int):
+        enqueued.append(project_id)
+        return "job-3"
+
+    monkeypatch.setattr("app.routes.enqueue_project_processing", fake_enqueue)
+
+    with app.app_context():
+        t = Template(name="Transcript Template", prompt_instructions="- Seccion TXT")
+        db.session.add(t)
+        db.session.commit()
+        t_id = t.id
+
+    response = client.post(
+        "/projects",
+        data={
+            "title": "Desde transcripciones",
+            "language": "es",
+            "source_mode": SOURCE_KIND_TRANSCRIPT_FILES,
+            "template_id": str(t_id),
+            "transcript_files": [
+                (io.BytesIO("Primera parte".encode("utf-8")), "parte-1.txt"),
+                (io.BytesIO("Segunda parte".encode("utf-8")), "parte-2.md"),
+                (io.BytesIO("3\n00:00:00,000 --> 00:00:02,000\nTercera parte".encode("utf-8")), "parte-3.srt"),
+            ],
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    with app.app_context():
+        project = Project.query.one()
+        assert project.status == "queued"
+        assert project.source_kind == SOURCE_KIND_TRANSCRIPT_FILES
+        assert "3 transcripciones" in project.source_filename
+        manifest_path = Path(project.source_file_path)
+        assert manifest_path.exists()
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert [item["original_filename"] for item in manifest["files"]] == [
+            "parte-1.txt",
+            "parte-2.md",
+            "parte-3.srt",
+        ]
+        assert enqueued == [project.id]
+
+
 def test_allowed_file_extensions():
     assert allowed_file("video.mp4")
     assert allowed_file("audio.MP3")
     assert allowed_file("mesa.webm")
     assert not allowed_file("script.sh")
     assert not allowed_file("archivo")
+
+
+def test_allowed_transcript_file_extensions():
+    assert allowed_transcript_file("parte.txt")
+    assert allowed_transcript_file("parte.MD")
+    assert allowed_transcript_file("parte.docx")
+    assert allowed_transcript_file("parte.srt")
+    assert allowed_transcript_file("parte.vtt")
+    assert not allowed_transcript_file("parte.pdf")
+    assert not allowed_transcript_file("archivo")
 
 
 def test_transcription_cost_estimate_helpers():
@@ -155,6 +217,9 @@ def test_new_project_defaults_language_to_spanish(client):
     assert '<option value="gpt-4o-transcribe" selected>Alta calidad</option>' in html
     assert 'id="transcription-cost-estimate"' in html
     assert "Solo transcripción; no incluye limpieza, resumen ni dossier." in html
+    assert 'name="source_mode" value="transcript_files"' in html
+    assert 'name="transcript_files"' in html
+    assert ".txt,.md,.docx,.srt,.vtt" in html
     assert "0.003" in html
 
 
@@ -174,6 +239,58 @@ def test_project_creation_rejects_invalid_transcription_model(client, app, monke
             "transcription_model": "modelo-inventado",
             "template_id": str(t_id),
             "source_file": (io.BytesIO(b"fake audio"), "evento.mp3"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    with app.app_context():
+        assert Project.query.count() == 0
+
+
+def test_project_creation_rejects_invalid_transcript_file(client, app, monkeypatch):
+    monkeypatch.setattr("app.routes.enqueue_project_processing", lambda project_id: "job-1")
+    with app.app_context():
+        t = Template(name="Test Template", prompt_instructions="- Seccion 1")
+        db.session.add(t)
+        db.session.commit()
+        t_id = t.id
+
+    response = client.post(
+        "/projects",
+        data={
+            "title": "Jornada test",
+            "language": "es",
+            "source_mode": SOURCE_KIND_TRANSCRIPT_FILES,
+            "template_id": str(t_id),
+            "transcript_files": (io.BytesIO(b"fake"), "parte.pdf"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    with app.app_context():
+        assert Project.query.count() == 0
+
+
+def test_project_creation_rejects_empty_transcript_file(client, app, monkeypatch):
+    monkeypatch.setattr("app.routes.enqueue_project_processing", lambda project_id: "job-1")
+    with app.app_context():
+        t = Template(name="Test Template", prompt_instructions="- Seccion 1")
+        db.session.add(t)
+        db.session.commit()
+        t_id = t.id
+
+    response = client.post(
+        "/projects",
+        data={
+            "title": "Jornada test",
+            "language": "es",
+            "source_mode": SOURCE_KIND_TRANSCRIPT_FILES,
+            "template_id": str(t_id),
+            "transcript_files": (io.BytesIO(b""), "parte.txt"),
         },
         content_type="multipart/form-data",
         follow_redirects=False,
@@ -204,6 +321,30 @@ def test_project_status_shows_selected_transcription_model(client, app):
     assert response.status_code == 200
     assert "Modelo" in html
     assert "Equilibrado" in html
+
+
+def test_project_status_shows_transcript_file_source(client, app):
+    with app.app_context():
+        project = Project(
+            title="Jornada con transcripciones",
+            source_filename="2 transcripciones: parte-1.txt, parte-2.txt",
+            source_file_path="manifest.json",
+            source_kind=SOURCE_KIND_TRANSCRIPT_FILES,
+            language="es",
+            status="importing_transcript",
+        )
+        db.session.add(project)
+        db.session.commit()
+        project_id = project.id
+
+    response = client.get(f"/projects/{project_id}/status")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Importar" in html
+    assert "Archivos" in html
+    assert "No aplica" in html
+    assert "2 transcripciones" in html
 
 
 def test_template_crud(app):
@@ -396,6 +537,51 @@ def test_text_to_pdf_creates_pdf_file(tmp_path):
     assert output_path.stat().st_size > 0
 
 
+def test_extract_transcript_text_reads_supported_formats(tmp_path):
+    txt_path = tmp_path / "parte.txt"
+    md_path = tmp_path / "parte.md"
+    srt_path = tmp_path / "parte.srt"
+    vtt_path = tmp_path / "parte.vtt"
+    docx_path = tmp_path / "parte.docx"
+
+    txt_path.write_text("Texto plano", encoding="utf-8")
+    md_path.write_text("# Titulo\n\nTexto markdown", encoding="utf-8")
+    srt_path.write_text(
+        "1\n00:00:00,000 --> 00:00:02,000\nTexto subtitulo\n\n",
+        encoding="utf-8",
+    )
+    vtt_path.write_text(
+        "WEBVTT\n\n00:00.000 --> 00:02.000\nTexto webvtt\n\n",
+        encoding="utf-8",
+    )
+
+    from docx import Document
+
+    document = Document()
+    document.add_paragraph("Texto docx")
+    document.save(docx_path)
+
+    assert extract_transcript_text(txt_path) == "Texto plano"
+    assert "Texto markdown" in extract_transcript_text(md_path)
+    assert extract_transcript_text(srt_path) == "Texto subtitulo"
+    assert extract_transcript_text(vtt_path) == "Texto webvtt"
+    assert extract_transcript_text(docx_path) == "Texto docx"
+
+
+def test_extract_transcript_text_rejects_empty_and_unsupported(tmp_path):
+    empty_path = tmp_path / "vacia.txt"
+    pdf_path = tmp_path / "parte.pdf"
+    empty_path.write_text("", encoding="utf-8")
+    pdf_path.write_bytes(b"fake")
+
+    import pytest
+
+    with pytest.raises(ValueError):
+        extract_transcript_text(empty_path)
+    with pytest.raises(ValueError):
+        extract_transcript_text(pdf_path)
+
+
 def test_parse_silencedetect_output_reads_ranges():
     output = """
     [silencedetect @ 000] silence_start: 1000.12
@@ -520,6 +706,81 @@ def test_build_transcription_prompt_includes_key_terms(app):
     assert "García" in prompt
     assert "Jornada Innovation" in prompt
     assert "Acme Corp" in prompt
+
+
+def test_process_project_imports_transcript_files_without_transcribing(app, tmp_path, monkeypatch):
+    def fail_media_step(*_args, **_kwargs):
+        raise AssertionError("media processing should not run")
+
+    monkeypatch.setattr("app.tasks.get_media_duration", fail_media_step)
+    monkeypatch.setattr("app.tasks.extract_audio", fail_media_step)
+    monkeypatch.setattr("app.tasks.normalize_audio", fail_media_step)
+    monkeypatch.setattr("app.tasks.split_audio", fail_media_step)
+    monkeypatch.setattr("app.tasks.transcribe_audio", fail_media_step)
+    monkeypatch.setattr("app.tasks.clean_transcript", lambda text, _language: text)
+    monkeypatch.setattr("app.tasks.summarize_chunk", lambda text, _language: "Resumen")
+    monkeypatch.setattr("app.tasks.generate_final_dossier", lambda *_args: "# Dossier")
+    monkeypatch.setattr(
+        "app.tasks.markdown_to_docx",
+        lambda _markdown, output_path: Path(output_path).write_bytes(b"docx"),
+    )
+
+    with app.app_context():
+        source_dir = tmp_path / "transcripts"
+        source_dir.mkdir()
+        part_1 = source_dir / "01-parte.txt"
+        part_2 = source_dir / "02-parte.txt"
+        part_1.write_text("apertura con nombres propios repetidos", encoding="utf-8")
+        part_2.write_text("nombres propios repetidos y cierre final", encoding="utf-8")
+        manifest_path = source_dir / "transcript_manifest.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "files": [
+                        {
+                            "order": 1,
+                            "original_filename": "parte-1.txt",
+                            "stored_filename": part_1.name,
+                            "path": str(part_1),
+                            "size": part_1.stat().st_size,
+                        },
+                        {
+                            "order": 2,
+                            "original_filename": "parte-2.txt",
+                            "stored_filename": part_2.name,
+                            "path": str(part_2),
+                            "size": part_2.stat().st_size,
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        template = Template(name="Plantilla", prompt_instructions="- Seccion")
+        project = Project(
+            title="Jornada de producto",
+            source_filename="2 transcripciones: parte-1.txt, parte-2.txt",
+            source_file_path=str(manifest_path),
+            source_kind=SOURCE_KIND_TRANSCRIPT_FILES,
+            language="es",
+            template=template,
+            status="queued",
+        )
+        db.session.add(project)
+        db.session.commit()
+        project_id = project.id
+
+        process_project(project_id)
+
+        project = Project.query.get(project_id)
+        assert project.status == "completed"
+        assert project.chunks == []
+        assert (
+            project.output.full_transcript
+            == "apertura con nombres propios repetidos\n\ny cierre final"
+        )
+        assert project.output.final_dossier_docx_path
 
 
 def test_process_project_uses_project_transcription_model(app, tmp_path, monkeypatch):

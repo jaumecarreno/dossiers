@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import uuid
 
@@ -22,7 +23,11 @@ from app.constants import (
     STATUS_LABELS,
     TRANSCRIPTION_MODEL_CHOICES,
     TRANSCRIPTION_MODEL_COSTS_USD_PER_MINUTE,
+    SOURCE_KIND_MEDIA,
+    SOURCE_KIND_TRANSCRIPT_FILES,
+    SOURCE_KIND_YOUTUBE,
     allowed_file,
+    allowed_transcript_file,
     get_transcription_model_label,
     get_project_progress,
     is_valid_language,
@@ -44,6 +49,8 @@ def add_project_log(project_id: int, message: str, level: str = "info") -> None:
 
 def get_estimated_time(project) -> str | None:
     if project.status in ("completed", "failed"):
+        return None
+    if project.source_kind == SOURCE_KIND_TRANSCRIPT_FILES:
         return None
     if not project.duration_seconds:
         return "~ calculando..."
@@ -99,15 +106,65 @@ def new_project():
     return render_template("projects/new.html", **_template_context())
 
 
+def _source_filename_summary(filenames: list[str]) -> str:
+    safe_names = [
+        secure_filename(name) or f"transcripcion-{index}.txt"
+        for index, name in enumerate(filenames, start=1)
+    ]
+    if len(safe_names) == 1:
+        return safe_names[0]
+    preview = ", ".join(safe_names[:3])
+    if len(safe_names) > 3:
+        preview += f" y {len(safe_names) - 3} mas"
+    summary = f"{len(safe_names)} transcripciones: {preview}"
+    if len(summary) > 512:
+        return summary[:509] + "..."
+    return summary
+
+
+def _save_transcript_uploads(project_id: int, uploads) -> Path:
+    original_dir = project_original_dir(project_id)
+    manifest = {"version": 1, "files": []}
+    for index, upload in enumerate(uploads, start=1):
+        safe_name = secure_filename(upload.filename or "") or f"transcripcion-{index}.txt"
+        stored_name = f"{index:02d}-{safe_name}"
+        path = original_dir / stored_name
+        upload.save(path)
+        if path.stat().st_size == 0:
+            raise ValueError(f"La transcripcion esta vacia: {upload.filename}")
+        manifest["files"].append(
+            {
+                "order": index,
+                "original_filename": upload.filename,
+                "stored_filename": stored_name,
+                "path": str(path),
+                "size": path.stat().st_size,
+            }
+        )
+
+    manifest_path = original_dir / "transcript_manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return manifest_path
+
+
 @bp.post("/projects")
 def create_project():
     title = (request.form.get("title") or "").strip()
     client_name = (request.form.get("client_name") or "").strip() or None
     event_name = (request.form.get("event_name") or "").strip() or None
     language = request.form.get("language") or "es"
+    source_mode = request.form.get("source_mode") or SOURCE_KIND_MEDIA
     transcription_model = request.form.get("transcription_model") or DEFAULT_TRANSCRIPTION_MODEL
     template_id_str = request.form.get("template_id")
     upload = request.files.get("source_file")
+    transcript_uploads = [
+        file
+        for file in request.files.getlist("transcript_files")
+        if file and file.filename
+    ]
     youtube_url = (request.form.get("youtube_url") or "").strip()
 
     if not title:
@@ -128,13 +185,33 @@ def create_project():
         flash("La plantilla seleccionada no existe.", "error")
         return redirect(url_for("main.new_project"))
 
-    if not upload or not upload.filename:
+    if source_mode not in {SOURCE_KIND_MEDIA, SOURCE_KIND_TRANSCRIPT_FILES}:
+        flash("Tipo de origen no valido.", "error")
+        return redirect(url_for("main.new_project"))
+
+    source_kind = SOURCE_KIND_MEDIA
+    if source_mode == SOURCE_KIND_TRANSCRIPT_FILES:
+        source_kind = SOURCE_KIND_TRANSCRIPT_FILES
+        if not transcript_uploads:
+            flash("Sube al menos un archivo de transcripcion.", "error")
+            return redirect(url_for("main.new_project"))
+        invalid_transcripts = [
+            file.filename
+            for file in transcript_uploads
+            if not allowed_transcript_file(file.filename)
+        ]
+        if invalid_transcripts:
+            flash("Tipo de transcripcion no permitido.", "error")
+            return redirect(url_for("main.new_project"))
+        filename = _source_filename_summary([file.filename for file in transcript_uploads])
+    elif not upload or not upload.filename:
         if not youtube_url:
             flash("Selecciona un archivo o indica una URL de YouTube.", "error")
             return redirect(url_for("main.new_project"))
         if not is_youtube_url(youtube_url):
             flash("La URL no parece válida de YouTube.", "error")
             return redirect(url_for("main.new_project"))
+        source_kind = SOURCE_KIND_YOUTUBE
         filename = "youtube_source.mp3"
     else:
         if not allowed_file(upload.filename):
@@ -147,6 +224,7 @@ def create_project():
         event_name=event_name,
         source_filename=filename,
         source_file_path="",
+        source_kind=source_kind,
         language=language,
         transcription_model=transcription_model,
         template_id=template.id,
@@ -158,7 +236,14 @@ def create_project():
 
     original_dir = project_original_dir(project.id)
     source_path = original_dir / filename
-    if upload and upload.filename:
+    if source_kind == SOURCE_KIND_TRANSCRIPT_FILES:
+        try:
+            source_path = _save_transcript_uploads(project.id, transcript_uploads)
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), "error")
+            return redirect(url_for("main.new_project"))
+    elif upload and upload.filename:
         upload.save(source_path)
     else:
         try:

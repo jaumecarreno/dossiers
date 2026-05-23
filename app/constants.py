@@ -1,6 +1,16 @@
 from __future__ import annotations
 
+SOURCE_KIND_MEDIA = "media"
+SOURCE_KIND_YOUTUBE = "youtube"
+SOURCE_KIND_TRANSCRIPT_FILES = "transcript_files"
+SOURCE_KINDS = {
+    SOURCE_KIND_MEDIA,
+    SOURCE_KIND_YOUTUBE,
+    SOURCE_KIND_TRANSCRIPT_FILES,
+}
+
 ALLOWED_EXTENSIONS = {"mp4", "mov", "m4v", "mp3", "wav", "m4a", "webm"}
+ALLOWED_TRANSCRIPT_EXTENSIONS = {"txt", "md", "docx", "srt", "vtt"}
 DEFAULT_TRANSCRIPTION_MODEL = "gpt-4o-transcribe"
 LANGUAGE_CHOICES = {
     "ca": "Catalán",
@@ -31,6 +41,7 @@ TRANSCRIPTION_MODEL_COSTS_USD_PER_MINUTE = {
 PROJECT_STATUSES = [
     "uploaded",
     "queued",
+    "importing_transcript",
     "extracting_audio",
     "splitting_audio",
     "transcribing",
@@ -44,6 +55,7 @@ PROJECT_STATUSES = [
 STATUS_LABELS = {
     "uploaded": "Subido",
     "queued": "En cola",
+    "importing_transcript": "Importando transcripciones",
     "extracting_audio": "Extrayendo audio",
     "splitting_audio": "Dividiendo",
     "transcribing": "Transcribiendo",
@@ -56,6 +68,13 @@ STATUS_LABELS = {
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def allowed_transcript_file(filename: str) -> bool:
+    return (
+        "." in filename
+        and filename.rsplit(".", 1)[1].lower() in ALLOWED_TRANSCRIPT_EXTENSIONS
+    )
 
 
 def is_valid_language(lang: str) -> bool:

@@ -36,6 +36,7 @@ class Project(TimestampMixin, db.Model):
     event_name = db.Column(db.String(255), nullable=True)
     source_filename = db.Column(db.String(512), nullable=False)
     source_file_path = db.Column(db.String(1024), nullable=False)
+    source_kind = db.Column(db.String(32), nullable=False, default="media")
     duration_seconds = db.Column(db.Integer, nullable=True)
     language = db.Column(db.String(8), nullable=False, default="auto")
     transcription_model = db.Column(

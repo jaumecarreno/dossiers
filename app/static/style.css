@@ -509,6 +509,7 @@ nav .button-primary:hover {
 .status-extracting_audio,
 .status-splitting_audio,
 .status-transcribing,
+.status-importing_transcript,
 .status-cleaning_transcript,
 .status-summarizing,
 .status-generating_dossier {
@@ -783,6 +784,109 @@ input:focus, select:focus {
   outline: none;
   border-color: var(--input-focus);
   box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+.source-mode-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.source-mode-option {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 3rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  cursor: pointer;
+}
+
+.source-mode-option input {
+  width: auto;
+  min-height: auto;
+}
+
+.source-mode-option span {
+  margin: 0;
+}
+
+.source-fields[hidden] {
+  display: none;
+}
+
+.transcript-file-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.transcript-file-item {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.transcript-file-index {
+  display: inline-grid;
+  place-items: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  border-radius: 999px;
+  background: var(--status-bg);
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.transcript-file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.transcript-file-size {
+  color: var(--muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--button-bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.icon-button-danger:hover {
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .cost-estimate {
@@ -1230,8 +1334,17 @@ th {
   }
 
   .form-grid,
+  .source-mode-group,
   .meta-grid {
     grid-template-columns: 1fr;
+  }
+
+  .transcript-file-item {
+    grid-template-columns: 2rem minmax(0, 1fr) auto auto auto;
+  }
+
+  .transcript-file-size {
+    display: none;
   }
 
   .card-grid {
@@ -1290,8 +1403,17 @@ th {
   }
 
   .form-grid,
+  .source-mode-group,
   .meta-grid {
     grid-template-columns: 1fr;
+  }
+
+  .transcript-file-item {
+    grid-template-columns: 2rem minmax(0, 1fr) auto auto auto;
+  }
+
+  .transcript-file-size {
+    display: none;
   }
 
   .card-grid {

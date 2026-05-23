@@ -7,7 +7,11 @@ import string
 
 from flask import current_app, has_app_context
 
-from app.constants import DEFAULT_TRANSCRIPTION_MODEL, LANGUAGE_CHOICES
+from app.constants import (
+    DEFAULT_TRANSCRIPTION_MODEL,
+    LANGUAGE_CHOICES,
+    SOURCE_KIND_TRANSCRIPT_FILES,
+)
 from app.extensions import db
 from app.models import Project, ProjectLog, ProjectOutput, TranscriptChunk
 from app.services.export_service import markdown_to_docx
@@ -18,6 +22,7 @@ from app.services.openai_service import (
     summarize_chunk,
     transcribe_audio,
 )
+from app.services.transcript_import_service import load_transcript_texts_from_manifest
 from app.storage import project_audio_dir, project_chunks_dir, project_outputs_dir
 
 
@@ -146,12 +151,81 @@ def _append_transcript(transcripts: list[str], text: str) -> None:
         transcripts.append(cleaned)
 
 
+def _build_full_transcript_from_transcript_files(project: Project) -> str:
+    _set_status(project, "importing_transcript", "Importando transcripciones subidas.")
+    transcripts: list[str] = []
+    for filename, text in load_transcript_texts_from_manifest(project.source_file_path):
+        _append_transcript(transcripts, text)
+        db.session.add(
+            ProjectLog(
+                project_id=project.id,
+                message=f"Transcripcion importada: {filename}",
+                level="info",
+            )
+        )
+    full_transcript = "\n\n".join(transcripts).strip()
+    if not full_transcript:
+        raise ValueError("Las transcripciones subidas no contienen texto util.")
+    return full_transcript
+
+
+def _complete_project_from_transcript(project: Project, full_transcript: str) -> None:
+    output = ProjectOutput.query.filter_by(project_id=project.id).one_or_none()
+    if not output:
+        output = ProjectOutput(project_id=project.id)
+        db.session.add(output)
+    output.full_transcript = full_transcript
+    db.session.commit()
+
+    if not output.cleaned_transcript:
+        _set_status(project, "cleaning_transcript", "Limpiando transcripciÃ³n.")
+        output.cleaned_transcript = clean_transcript(full_transcript, project.language)
+        db.session.commit()
+
+    if not output.block_summary:
+        _set_status(project, "summarizing", "Generando resumen por bloques.")
+        text_blocks = _split_text(output.cleaned_transcript or "")
+        block_summaries = []
+        for index, block in enumerate(text_blocks, start=1):
+            summary = summarize_chunk(block, project.language)
+            block_summaries.append(f"## Bloque {index}\n\n{summary}")
+        if len(block_summaries) > 1:
+            global_summary = summarize_chunk("\n\n".join(block_summaries), project.language)
+            block_summaries.append(f"## Resumen global\n\n{global_summary}")
+        output.block_summary = "\n\n".join(block_summaries)
+        db.session.commit()
+
+    if not output.final_dossier_markdown:
+        _set_status(project, "generating_dossier", "Generando dossier final.")
+        output.final_dossier_markdown = generate_final_dossier(
+            project,
+            output.cleaned_transcript or "",
+            output.block_summary or "",
+        )
+        db.session.commit()
+
+    outputs_dir = project_outputs_dir(project.id)
+    markdown_path = outputs_dir / "dossier.md"
+    markdown_path.write_text(output.final_dossier_markdown or "", encoding="utf-8")
+    docx_path = outputs_dir / "dossier.docx"
+    markdown_to_docx(output.final_dossier_markdown or "", docx_path)
+    output.final_dossier_docx_path = str(docx_path)
+    project.status = "completed"
+    db.session.add(ProjectLog(project_id=project.id, message="Dossier completado."))
+    db.session.commit()
+
+
 def _process_project(project_id: int) -> None:
     project = Project.query.get(project_id)
     if not project:
         return
 
     try:
+        if project.source_kind == SOURCE_KIND_TRANSCRIPT_FILES:
+            full_transcript = _build_full_transcript_from_transcript_files(project)
+            _complete_project_from_transcript(project, full_transcript)
+            return
+
         source_path = Path(project.source_file_path)
         raw_audio_path = project_audio_dir(project.id) / "audio_raw.mp3"
         audio_path = project_audio_dir(project.id) / "audio.mp3"
