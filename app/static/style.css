@@ -98,7 +98,7 @@ body {
   margin: 0;
   min-height: 100vh;
   display: flex;
-  flex-direction: column;
+  flex-direction: row; /* changed from column */
   background: var(--bg);
   color: var(--text);
   font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -106,6 +106,79 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* ========================================
+   Responsive & Defaults
+   ======================================== */
+.default-template-row {
+  background-color: var(--panel-hover);
+  border-left: 4px solid var(--primary);
+}
+
+@media (max-width: 768px) {
+  body {
+    flex-direction: column;
+  }
+  
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    transform: translateX(-100%);
+    width: 280px;
+    box-shadow: var(--card-shadow-hover);
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-overlay.open {
+    display: block;
+    opacity: 1;
+  }
+  
+  .mobile-header {
+    display: flex;
+  }
+
+  .page-header,
+  .status-header {
+    flex-direction: column;
+  }
+
+  .form-grid,
+  .meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .logs li {
+    grid-template-columns: 1fr;
+  }
+
+  .stepper {
+    gap: 0;
+  }
+
+  .stepper-step {
+    min-width: 60px;
+  }
+
+  .stepper-label {
+    font-size: 0.6rem;
+  }
 }
 
 a {
@@ -127,20 +200,55 @@ h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; }
 h3 { font-size: 1.05rem; font-weight: 700; }
 
 /* ========================================
-   Topbar
+   Sidebar & Mobile Header
    ======================================== */
-.topbar {
-  display: flex;
+.mobile-header {
+  display: none;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
   padding: 0.75rem clamp(1rem, 4vw, 2rem);
   border-bottom: 1px solid var(--line);
   background: var(--panel);
   backdrop-filter: blur(12px);
   position: sticky;
   top: 0;
+  z-index: 90;
+}
+
+.mobile-menu-btn {
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0.5rem;
+  line-height: 0;
+  margin-left: -0.5rem;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 260px;
+  min-width: 260px;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+  padding: 1.5rem 1rem;
   z-index: 100;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  backdrop-filter: blur(2px);
+  z-index: 95;
+  opacity: 0;
+  transition: opacity 0.3s;
 }
 
 .brand {
@@ -151,6 +259,8 @@ h3 { font-size: 1.05rem; font-weight: 700; }
   font-size: 1.15rem;
   font-weight: 800;
   letter-spacing: -0.01em;
+  margin-bottom: 2rem;
+  padding: 0 0.5rem;
 }
 
 .brand-icon {
@@ -158,27 +268,58 @@ h3 { font-size: 1.05rem; font-weight: 700; }
   flex-shrink: 0;
 }
 
-nav, .actions, .form-actions {
+nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex: 1;
+}
+
+.actions, .form-actions {
   display: flex;
   align-items: center;
   gap: 0.6rem;
 }
 
-nav a {
+nav a, nav button {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.45rem 0.7rem;
-  border-radius: 6px;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
   color: var(--text-secondary);
-  font-size: 0.88rem;
+  font-size: 0.95rem;
   font-weight: 600;
   transition: all 0.15s;
+  text-decoration: none;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
 }
 
-nav a:hover {
+nav a:hover, nav button:hover {
   color: var(--text);
   background: var(--panel-hover);
+}
+
+nav .button-primary {
+  margin-top: 1rem;
+  color: var(--primary-text);
+  justify-content: center;
+}
+nav .button-primary:hover {
+  color: var(--primary-text);
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 /* ========================================
@@ -186,7 +327,8 @@ nav a:hover {
    ======================================== */
 .page {
   flex: 1;
-  width: min(1180px, 100%);
+  width: 100%;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 2rem clamp(1rem, 4vw, 2rem);
   animation: fadeIn 0.35s ease-out;

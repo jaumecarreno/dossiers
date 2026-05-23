@@ -28,7 +28,7 @@
           </thead>
           <tbody>
             {% for template in templates %}
-              <tr {% if template.is_default %}style="background-color: var(--surface-hover, #f3f4f6); border-left: 4px solid var(--primary, #3b82f6);"{% endif %}>
+              <tr {% if template.is_default %}class="default-template-row"{% endif %}>
                 <td>
                   <strong>{{ template.name }}</strong>
                   {% if template.is_default %}
