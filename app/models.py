@@ -22,6 +22,7 @@ class Template(TimestampMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(255), nullable=False)
     prompt_instructions = db.Column(db.Text, nullable=False)
+    is_default = db.Column(db.Boolean, default=False, nullable=False)
 
     projects = db.relationship("Project", back_populates="template")
 

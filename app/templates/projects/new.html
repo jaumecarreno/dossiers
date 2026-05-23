@@ -57,7 +57,7 @@
         <span>Plantilla</span>
         <select name="template_id" required>
           {% for template in templates %}
-            <option value="{{ template.id }}">{{ template.name }}</option>
+            <option value="{{ template.id }}" {% if template.is_default %}selected{% endif %}>{{ template.name }}</option>
           {% endfor %}
         </select>
       </label>

@@ -28,12 +28,24 @@
           </thead>
           <tbody>
             {% for template in templates %}
-              <tr>
-                <td><strong>{{ template.name }}</strong></td>
+              <tr {% if template.is_default %}style="background-color: var(--surface-hover, #f3f4f6); border-left: 4px solid var(--primary, #3b82f6);"{% endif %}>
+                <td>
+                  <strong>{{ template.name }}</strong>
+                  {% if template.is_default %}
+                    <span style="margin-left: 8px; font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; background-color: var(--primary, #3b82f6); color: white;">Predeterminada</span>
+                  {% endif %}
+                </td>
                 <td><span class="muted" style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 400px;" title="{{ template.prompt_instructions }}">{{ template.prompt_instructions }}</span></td>
                 <td>{{ template.updated_at.strftime("%d/%m/%Y") }}</td>
                 <td>
                   <div style="display:flex; gap:0.5rem; justify-content:flex-end;">
+                    {% if not template.is_default %}
+                    <form action="{{ url_for('main.set_default_template', template_id=template.id) }}" method="post" style="margin:0;">
+                      <button class="button button-sm" type="submit">
+                        Predeterminada
+                      </button>
+                    </form>
+                    {% endif %}
                     <a class="button button-sm" href="{{ url_for('main.edit_template', template_id=template.id) }}">
                       Editar
                     </a>

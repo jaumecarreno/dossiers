@@ -62,7 +62,7 @@ def get_estimated_time(project) -> str | None:
 
 
 def _template_context() -> dict:
-    templates = Template.query.all()
+    templates = Template.query.order_by(Template.is_default.desc(), Template.name).all()
     return {
         "templates": templates,
         "language_choices": LANGUAGE_CHOICES,
@@ -338,7 +338,7 @@ def shared_dossier(token: str):
 
 @bp.get("/templates")
 def templates_list():
-    templates = Template.query.order_by(Template.name).all()
+    templates = Template.query.order_by(Template.is_default.desc(), Template.name).all()
     return render_template("templates/index.html", templates=templates)
 
 
@@ -383,6 +383,16 @@ def update_template(template_id: int):
     template.prompt_instructions = prompt_instructions
     db.session.commit()
     flash("Plantilla actualizada correctamente.", "success")
+    return redirect(url_for("main.templates_list"))
+
+
+@bp.post("/templates/<int:template_id>/set_default")
+def set_default_template(template_id: int):
+    template = Template.query.get_or_404(template_id)
+    Template.query.update({Template.is_default: False})
+    template.is_default = True
+    db.session.commit()
+    flash(f"Plantilla '{template.name}' establecida como predeterminada.", "success")
     return redirect(url_for("main.templates_list"))
 
 
