@@ -713,8 +713,7 @@ def test_process_project_imports_transcript_files_without_transcribing(app, tmp_
         raise AssertionError("media processing should not run")
 
     monkeypatch.setattr("app.tasks.get_media_duration", fail_media_step)
-    monkeypatch.setattr("app.tasks.extract_audio", fail_media_step)
-    monkeypatch.setattr("app.tasks.normalize_audio", fail_media_step)
+    monkeypatch.setattr("app.tasks.prepare_audio", fail_media_step)
     monkeypatch.setattr("app.tasks.split_audio", fail_media_step)
     monkeypatch.setattr("app.tasks.transcribe_audio", fail_media_step)
     monkeypatch.setattr("app.tasks.clean_transcript", lambda text, _language: text)
@@ -783,10 +782,66 @@ def test_process_project_imports_transcript_files_without_transcribing(app, tmp_
         assert project.output.final_dossier_docx_path
 
 
+def test_process_project_reports_failed_chunk_context(app, tmp_path, monkeypatch):
+    def fake_prepare_audio(_source_path, output_path):
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"audio")
+        return path
+
+    def fake_split_audio(_audio_path, output_dir, _chunk_minutes):
+        output = Path(output_dir)
+        chunk_path = output / "chunk_001.mp3"
+        chunk_path.parent.mkdir(parents=True, exist_ok=True)
+        chunk_path.write_bytes(b"chunk-audio")
+        return [AudioChunk(chunk_path, 0, 1200)]
+
+    def fake_transcribe_audio(*_args, **_kwargs):
+        raise RuntimeError("OpenAI timeout")
+
+    monkeypatch.setattr("app.tasks.ensure_media_tools_available", lambda: None)
+    monkeypatch.setattr("app.tasks.get_media_duration", lambda _path: 1200)
+    monkeypatch.setattr("app.tasks.prepare_audio", fake_prepare_audio)
+    monkeypatch.setattr("app.tasks.split_audio", fake_split_audio)
+    monkeypatch.setattr("app.tasks.transcribe_audio", fake_transcribe_audio)
+
+    with app.app_context():
+        source_path = tmp_path / "source.mp3"
+        source_path.write_bytes(b"audio")
+        template = Template(name="Plantilla", prompt_instructions="- Seccion")
+        project = Project(
+            title="Jornada fallida",
+            source_filename=source_path.name,
+            source_file_path=str(source_path),
+            language="es",
+            template=template,
+            status="queued",
+        )
+        db.session.add(project)
+        db.session.commit()
+        project_id = project.id
+
+        import pytest
+
+        with pytest.raises(RuntimeError):
+            process_project(project_id)
+
+        project = Project.query.get(project_id)
+        assert project.status == "failed"
+        assert "Fallo al transcribir el fragmento 1/1" in project.error_message
+        assert "OpenAI timeout" in project.error_message
+        assert project.chunks[0].status == "failed"
+        assert "0:00-20:00" in project.chunks[0].error_message
+        assert any(
+            "Fallo al transcribir el fragmento 1/1" in log.message
+            for log in project.logs
+        )
+
+
 def test_process_project_uses_project_transcription_model(app, tmp_path, monkeypatch):
     calls: list[dict] = []
 
-    def fake_extract_audio(_source_path, output_path):
+    def fake_prepare_audio(_source_path, output_path):
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"audio")
@@ -813,8 +868,8 @@ def test_process_project_uses_project_transcription_model(app, tmp_path, monkeyp
         return "nombres propios repetidos y cierre final", []
 
     monkeypatch.setattr("app.tasks.get_media_duration", lambda _path: 1800)
-    monkeypatch.setattr("app.tasks.extract_audio", fake_extract_audio)
-    monkeypatch.setattr("app.tasks.normalize_audio", fake_extract_audio)
+    monkeypatch.setattr("app.tasks.ensure_media_tools_available", lambda: None)
+    monkeypatch.setattr("app.tasks.prepare_audio", fake_prepare_audio)
     monkeypatch.setattr("app.tasks.split_audio", fake_split_audio)
     monkeypatch.setattr("app.tasks.transcribe_audio", fake_transcribe_audio)
     monkeypatch.setattr("app.tasks.clean_transcript", lambda text, _language: text)
@@ -896,6 +951,42 @@ def test_openai_service_uses_mocked_client(app, tmp_path, monkeypatch):
     with app.app_context():
         assert transcribe_audio(str(audio_path), "es") == ("Transcripción simulada", [{"start": 0.0, "end": 2.0, "text": "Transcripción simulada"}])
         assert clean_transcript("texto", "es") == "Texto limpio"
+
+
+def test_openai_transcription_retries_transient_errors(app, tmp_path, monkeypatch):
+    audio_path = tmp_path / "audio.mp3"
+    audio_path.write_bytes(b"fake")
+    calls = {"count": 0}
+
+    class TemporaryOpenAIError(Exception):
+        status_code = 429
+
+    class FakeTranscription:
+        text = "Transcripcion tras reintento"
+        segments = []
+
+    class FakeAudioTranscriptions:
+        def create(self, **_kwargs):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise TemporaryOpenAIError("rate limited")
+            return FakeTranscription()
+
+    class FakeAudio:
+        transcriptions = FakeAudioTranscriptions()
+
+    class FakeClient:
+        audio = FakeAudio()
+
+    monkeypatch.setattr("app.services.openai_service._client", lambda: FakeClient())
+    monkeypatch.setattr("app.services.openai_service.time.sleep", lambda _seconds: None)
+
+    with app.app_context():
+        assert transcribe_audio(str(audio_path), "es") == (
+            "Transcripcion tras reintento",
+            [],
+        )
+        assert calls["count"] == 2
 
 
 def test_openai_service_keeps_verbose_json_for_whisper(app, tmp_path, monkeypatch):

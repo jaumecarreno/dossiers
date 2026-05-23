@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
 
 from flask import current_app
 from openai import OpenAI
@@ -30,6 +31,20 @@ def _text_response(system_prompt: str, user_prompt: str) -> str:
     return str(response).strip()
 
 
+def _is_retryable_openai_error(exc: Exception) -> bool:
+    status_code = getattr(exc, "status_code", None)
+    if status_code in {408, 409, 429}:
+        return True
+    if isinstance(status_code, int) and status_code >= 500:
+        return True
+    return exc.__class__.__name__ in {
+        "APIConnectionError",
+        "APITimeoutError",
+        "RateLimitError",
+        "InternalServerError",
+    }
+
+
 def transcribe_audio(
     file_path: str,
     language: str | None = None,
@@ -50,7 +65,8 @@ def transcribe_audio(
         if prompt:
             kwargs["prompt"] = prompt
 
-        for _ in range(3):
+        max_attempts = 4
+        for attempt in range(max_attempts):
             try:
                 response = _client().audio.transcriptions.create(**kwargs)
                 break
@@ -78,6 +94,11 @@ def transcribe_audio(
                 if not should_retry:
                     raise
                 audio_file.seek(0)
+            except Exception as exc:
+                if attempt >= max_attempts - 1 or not _is_retryable_openai_error(exc):
+                    raise
+                audio_file.seek(0)
+                time.sleep(min(20, 2 ** attempt))
         else:  # pragma: no cover - defensive loop guard
             raise RuntimeError("No se pudo transcribir el audio con los parámetros disponibles.")
         

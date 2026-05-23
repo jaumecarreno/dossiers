@@ -15,7 +15,12 @@ from app.constants import (
 from app.extensions import db
 from app.models import Project, ProjectLog, ProjectOutput, TranscriptChunk
 from app.services.export_service import markdown_to_docx
-from app.services.media_service import extract_audio, get_media_duration, normalize_audio, split_audio
+from app.services.media_service import (
+    ensure_media_tools_available,
+    get_media_duration,
+    prepare_audio,
+    split_audio,
+)
 from app.services.openai_service import (
     clean_transcript,
     generate_final_dossier,
@@ -44,6 +49,39 @@ def _set_status(project: Project, status: str, message: str | None = None) -> No
     if message:
         db.session.add(ProjectLog(project_id=project.id, message=message, level="info"))
     db.session.commit()
+
+
+def _add_project_log(project: Project, message: str, level: str = "info") -> None:
+    db.session.add(ProjectLog(project_id=project.id, message=message, level=level))
+
+
+def _format_seconds(seconds: int | float | None) -> str:
+    if seconds is None:
+        return "--:--"
+    total = max(0, int(round(seconds)))
+    hours = total // 3600
+    minutes = (total % 3600) // 60
+    remaining = total % 60
+    if hours:
+        return f"{hours}:{minutes:02}:{remaining:02}"
+    return f"{minutes}:{remaining:02}"
+
+
+def _chunk_range(chunk: TranscriptChunk) -> str:
+    return f"{_format_seconds(chunk.start_seconds)}-{_format_seconds(chunk.end_seconds)}"
+
+
+def _file_size_mb(path: str | Path) -> float:
+    try:
+        return Path(path).stat().st_size / (1024 * 1024)
+    except OSError:
+        return 0.0
+
+
+def _friendly_error(exc: Exception) -> str:
+    text = str(exc).strip() or exc.__class__.__name__
+    first_line = text.splitlines()[0].strip()
+    return first_line[:1200]
 
 
 def _split_text(text: str, max_chars: int = 12000) -> list[str]:
@@ -178,7 +216,7 @@ def _complete_project_from_transcript(project: Project, full_transcript: str) ->
     db.session.commit()
 
     if not output.cleaned_transcript:
-        _set_status(project, "cleaning_transcript", "Limpiando transcripciÃ³n.")
+        _set_status(project, "cleaning_transcript", "Limpiando transcripcion.")
         output.cleaned_transcript = clean_transcript(full_transcript, project.language)
         db.session.commit()
 
@@ -227,15 +265,22 @@ def _process_project(project_id: int) -> None:
             return
 
         source_path = Path(project.source_file_path)
-        raw_audio_path = project_audio_dir(project.id) / "audio_raw.mp3"
         audio_path = project_audio_dir(project.id) / "audio.mp3"
         chunk_minutes = current_app.config["TRANSCRIPT_CHUNK_MINUTES"]
 
-        _set_status(project, "extracting_audio", "Extrayendo audio con ffmpeg.")
+        _set_status(project, "extracting_audio", "Preparando audio con ffmpeg.")
+        ensure_media_tools_available()
         project.duration_seconds = get_media_duration(source_path)
+        _add_project_log(
+            project,
+            f"Duracion detectada: {_format_seconds(project.duration_seconds)}.",
+        )
         if not audio_path.exists() or audio_path.stat().st_size == 0:
-            extract_audio(source_path, raw_audio_path)
-            normalize_audio(raw_audio_path, audio_path)
+            prepare_audio(source_path, audio_path)
+            _add_project_log(
+                project,
+                f"Audio preparado para transcripcion ({_file_size_mb(audio_path):.1f} MB).",
+            )
         db.session.commit()
 
         _set_status(project, "splitting_audio", "Dividiendo audio en fragmentos.")
@@ -253,6 +298,8 @@ def _process_project(project_id: int) -> None:
                     )
                 )
             db.session.commit()
+            _add_project_log(project, f"Audio dividido en {len(chunk_specs)} fragmentos.")
+            db.session.commit()
 
         _set_status(project, "transcribing", "Transcribiendo fragmentos con OpenAI.")
         transcripts: list[str] = []
@@ -261,12 +308,21 @@ def _process_project(project_id: int) -> None:
             or current_app.config.get("OPENAI_TRANSCRIPTION_MODEL")
             or DEFAULT_TRANSCRIPTION_MODEL
         )
+        total_chunks = len(project.chunks)
         for chunk in project.chunks:
             if chunk.status == "completed" and chunk.transcript_text:
                 _append_transcript(transcripts, chunk.transcript_text)
                 continue
                 
             chunk.status = "transcribing"
+            chunk_size_mb = _file_size_mb(chunk.audio_path)
+            _add_project_log(
+                project,
+                (
+                    f"Transcribiendo fragmento {chunk.chunk_index}/{total_chunks} "
+                    f"({_chunk_range(chunk)}, {chunk_size_mb:.1f} MB) con {transcription_model}."
+                ),
+            )
             db.session.commit()
             try:
                 prompt = _build_transcription_prompt(project, "\n\n".join(transcripts))
@@ -280,12 +336,21 @@ def _process_project(project_id: int) -> None:
                 chunk.segments_json = json.dumps(segments) if segments else None
                 chunk.status = "completed"
                 _append_transcript(transcripts, chunk.transcript_text or "")
+                _add_project_log(
+                    project,
+                    f"Fragmento {chunk.chunk_index}/{total_chunks} transcrito correctamente.",
+                )
                 db.session.commit()
             except Exception as exc:
+                message = (
+                    f"Fallo al transcribir el fragmento {chunk.chunk_index}/{total_chunks} "
+                    f"({_chunk_range(chunk)}, {chunk_size_mb:.1f} MB): {_friendly_error(exc)}"
+                )
                 chunk.status = "failed"
-                chunk.error_message = str(exc)
+                chunk.error_message = message
+                _add_project_log(project, message, level="error")
                 db.session.commit()
-                raise
+                raise RuntimeError(message) from exc
 
         full_transcript = "\n\n".join(transcripts).strip()
         output = ProjectOutput.query.filter_by(project_id=project.id).one_or_none()
@@ -296,7 +361,7 @@ def _process_project(project_id: int) -> None:
         db.session.commit()
 
         if not output.cleaned_transcript:
-            _set_status(project, "cleaning_transcript", "Limpiando transcripción.")
+            _set_status(project, "cleaning_transcript", "Limpiando transcripcion.")
             output.cleaned_transcript = clean_transcript(full_transcript, project.language)
             db.session.commit()
 
@@ -336,7 +401,13 @@ def _process_project(project_id: int) -> None:
         project = Project.query.get(project_id)
         if project:
             project.status = "failed"
-            project.error_message = str(exc)
-            db.session.add(ProjectLog(project_id=project.id, message=str(exc), level="error"))
+            project.error_message = _friendly_error(exc)
+            db.session.add(
+                ProjectLog(
+                    project_id=project.id,
+                    message=f"Proyecto fallido: {project.error_message}",
+                    level="error",
+                )
+            )
             db.session.commit()
         raise

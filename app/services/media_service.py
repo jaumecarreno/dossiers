@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,14 @@ MAX_CHUNK_SECONDS = 22 * 60
 CHUNK_OVERLAP_SECONDS = 15
 MAX_CHUNK_BYTES = 23 * 1024 * 1024
 TARGET_AUDIO_BITRATE_BPS = 64_000
+SPEECH_FILTERS = ",".join(
+    [
+        "highpass=f=80",
+        "lowpass=f=8000",
+        "afftdn=nf=-20",
+        "loudnorm=I=-16:TP=-1.5:LRA=11",
+    ]
+)
 
 
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -37,10 +46,23 @@ def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
             text=True,
         )
     except FileNotFoundError as exc:
-        raise MediaProcessingError("ffmpeg/ffprobe no está instalado o no está en PATH.") from exc
+        tool = command[0] if command else "ffmpeg/ffprobe"
+        raise MediaProcessingError(
+            f"{tool} no esta instalado o no esta en PATH. "
+            "Ejecuta la app con Docker o instala ffmpeg y ffprobe en el servidor."
+        ) from exc
     except subprocess.CalledProcessError as exc:
         detail = exc.stderr.strip() or exc.stdout.strip() or str(exc)
         raise MediaProcessingError(detail) from exc
+
+
+def ensure_media_tools_available() -> None:
+    missing = [tool for tool in ("ffmpeg", "ffprobe") if not shutil.which(tool)]
+    if missing:
+        raise MediaProcessingError(
+            "Faltan herramientas de audio: "
+            f"{', '.join(missing)}. Ejecuta la app con Docker o instalalas en el servidor."
+        )
 
 
 def get_media_duration(input_path: str | Path) -> int | None:
@@ -59,6 +81,32 @@ def get_media_duration(input_path: str | Path) -> int | None:
     if not value:
         return None
     return int(float(value))
+
+
+def prepare_audio(input_path: str | Path, output_path: str | Path) -> Path:
+    """Create a normalized mp3 ready for chunking and transcription in one pass."""
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(input_path),
+        "-vn",
+        "-af",
+        SPEECH_FILTERS,
+        "-acodec",
+        "libmp3lame",
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        "-b:a",
+        "64k",
+        str(output),
+    ]
+    _run(command)
+    return output
 
 
 def extract_audio(input_path: str | Path, output_path: str | Path) -> Path:
@@ -85,42 +133,8 @@ def extract_audio(input_path: str | Path, output_path: str | Path) -> Path:
 
 
 def normalize_audio(input_path: str | Path, output_path: str | Path) -> Path:
-    """Normalize volume and reduce background noise for better transcription.
-
-    Applies in a single FFmpeg pass:
-    - highpass  80 Hz  – removes low-frequency rumble (AC, footsteps)
-    - lowpass   8 kHz  – cuts frequencies above useful speech range
-    - afftdn   -20 dB  – gentle FFT-based noise reduction
-    - loudnorm EBU R128 – equalises loudness across the recording
-    """
-    output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    af_filters = ",".join([
-        "highpass=f=80",
-        "lowpass=f=8000",
-        "afftdn=nf=-20",
-        "loudnorm=I=-16:TP=-1.5:LRA=11",
-    ])
-    command = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        str(input_path),
-        "-vn",
-        "-af",
-        af_filters,
-        "-acodec",
-        "libmp3lame",
-        "-ar",
-        "16000",
-        "-ac",
-        "1",
-        "-b:a",
-        "64k",
-        str(output),
-    ]
-    _run(command)
-    return output
+    """Normalize volume and reduce background noise for better transcription."""
+    return prepare_audio(input_path, output_path)
 
 
 def detect_silences(
@@ -216,7 +230,7 @@ def split_audio(
     output.mkdir(parents=True, exist_ok=True)
     duration_seconds = get_media_duration(input_audio_path)
     if not duration_seconds:
-        raise MediaProcessingError("No se pudo detectar la duración del audio.")
+        raise MediaProcessingError("No se pudo detectar la duracion del audio.")
 
     try:
         silences = detect_silences(input_audio_path, silence_db, min_silence_seconds)
@@ -254,12 +268,12 @@ def split_audio(
         _run(command)
         if chunk_path.stat().st_size > MAX_CHUNK_BYTES:
             raise MediaProcessingError(
-                f"El fragmento {chunk_path.name} supera el límite seguro de 23 MB."
+                f"El fragmento {chunk_path.name} supera el limite seguro de 23 MB."
             )
         chunks.append(AudioChunk(chunk_path, start, end))
 
     if not chunks:
-        raise MediaProcessingError("No se generó ningún fragmento de audio.")
+        raise MediaProcessingError("No se genero ningun fragmento de audio.")
     return chunks
 
 
