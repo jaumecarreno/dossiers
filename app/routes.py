@@ -38,7 +38,16 @@ from app.models import Project, ProjectLog, ProjectOutput, TranscriptChunk, Temp
 from app.queue import enqueue_project_processing
 from app.services.export_service import get_transcript_content, markdown_to_docx, text_to_pdf
 from app.services.media_service import download_youtube_media, is_youtube_url
+from app.services.quality_service import (
+    build_quality_report,
+    glossary_text_from_project,
+    json_dumps,
+    json_loads_object,
+    parse_glossary_terms,
+    serialize_glossary_terms,
+)
 from app.storage import clear_generated_files, project_original_dir, project_root, project_outputs_dir
+from app.tasks import regenerate_project_outputs
 
 bp = Blueprint("main", __name__)
 
@@ -79,6 +88,9 @@ def _template_context() -> dict:
         "get_transcription_model_label": get_transcription_model_label,
         "get_project_progress": get_project_progress,
         "get_estimated_time": get_estimated_time,
+        "glossary_text_from_project": glossary_text_from_project,
+        "get_transcript_content": get_transcript_content,
+        "json_loads_object": json_loads_object,
     }
 
 
@@ -159,6 +171,7 @@ def create_project():
     source_mode = request.form.get("source_mode") or SOURCE_KIND_MEDIA
     transcription_model = request.form.get("transcription_model") or DEFAULT_TRANSCRIPTION_MODEL
     template_id_str = request.form.get("template_id")
+    glossary_terms = parse_glossary_terms(request.form.get("glossary"))
     upload = request.files.get("source_file")
     transcript_uploads = [
         file
@@ -226,6 +239,7 @@ def create_project():
         source_file_path="",
         source_kind=source_kind,
         language=language,
+        glossary_json=serialize_glossary_terms(glossary_terms),
         transcription_model=transcription_model,
         template_id=template.id,
         status="uploaded",
@@ -293,6 +307,66 @@ def project_status(project_id: int):
     )
 
 
+@bp.post("/projects/<int:project_id>/transcript/review")
+def save_transcript_review(project_id: int):
+    project = Project.query.get_or_404(project_id)
+    if not project.output:
+        abort(404)
+
+    reviewed_transcript = (request.form.get("reviewed_transcript") or "").strip()
+    if not reviewed_transcript:
+        flash("La transcripcion revisada no puede estar vacia.", "error")
+        return redirect(url_for("main.project_detail", project_id=project.id))
+
+    project.output.reviewed_transcript = reviewed_transcript
+    project.glossary_json = serialize_glossary_terms(
+        parse_glossary_terms(request.form.get("glossary"))
+    )
+    if project.status == "completed":
+        project.status = "reviewing_transcript"
+    project.output.quality_report_json = json_dumps(build_quality_report(project, project.output))
+    add_project_log(project.id, "Transcripcion revisada guardada. Regenera resumen o dossier para aplicar cambios.")
+    db.session.commit()
+    flash("Transcripcion revisada guardada.", "success")
+    return redirect(url_for("main.project_detail", project_id=project.id))
+
+
+@bp.post("/projects/<int:project_id>/glossary")
+def save_project_glossary(project_id: int):
+    project = Project.query.get_or_404(project_id)
+    project.glossary_json = serialize_glossary_terms(
+        parse_glossary_terms(request.form.get("glossary"))
+    )
+    if project.output:
+        project.output.quality_report_json = json_dumps(build_quality_report(project, project.output))
+    add_project_log(project.id, "Glosario del proyecto actualizado.")
+    db.session.commit()
+    flash("Glosario actualizado.", "success")
+    return redirect(url_for("main.project_detail", project_id=project.id))
+
+
+@bp.post("/projects/<int:project_id>/regenerate")
+def regenerate_project(project_id: int):
+    project = Project.query.get_or_404(project_id)
+    target = request.form.get("target", "all")
+    if target not in {"summary", "dossier", "exports", "all"}:
+        flash("Tipo de regeneracion no valido.", "error")
+        return redirect(url_for("main.project_detail", project_id=project.id))
+    try:
+        regenerate_project_outputs(project, target)
+    except Exception as exc:
+        db.session.rollback()
+        project = Project.query.get_or_404(project_id)
+        project.status = "failed"
+        project.error_message = str(exc)
+        add_project_log(project.id, f"Regeneracion fallida: {exc}", level="error")
+        db.session.commit()
+        flash(f"No se pudo regenerar: {exc}", "error")
+    else:
+        flash("Regeneracion completada.", "success")
+    return redirect(url_for("main.project_detail", project_id=project_id))
+
+
 @bp.post("/projects/<int:project_id>/retry")
 def retry_project(project_id: int):
     project = Project.query.get_or_404(project_id)
@@ -349,6 +423,24 @@ def download_docx(project_id: int):
         as_attachment=True,
         download_name=f"dossier-{project.id}.docx",
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
+@bp.get("/projects/<int:project_id>/download/pdf")
+def download_pdf(project_id: int):
+    project = Project.query.get_or_404(project_id)
+    if not project.output or not project.output.final_dossier_pdf_path:
+        abort(404)
+
+    path = Path(project.output.final_dossier_pdf_path)
+    if not path.exists():
+        abort(404)
+
+    return send_file(
+        path,
+        as_attachment=True,
+        download_name=f"dossier-{project.id}.pdf",
+        mimetype="application/pdf",
     )
 
 
@@ -417,6 +509,47 @@ def delete_project(project_id: int):
 def shared_dossier(token: str):
     project = Project.query.filter_by(share_token=token).first_or_404()
     return render_template("projects/shared.html", project=project)
+
+
+@bp.get("/p/<token>/download/<fmt>")
+def shared_download(token: str, fmt: str):
+    project = Project.query.filter_by(share_token=token).first_or_404()
+    if not project.output:
+        abort(404)
+
+    if fmt == "markdown":
+        if not project.output.final_dossier_markdown:
+            abort(404)
+        filename = f"dossier-{project.id}.md"
+        return Response(
+            project.output.final_dossier_markdown,
+            mimetype="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+
+    if fmt == "docx":
+        path = Path(project.output.final_dossier_docx_path or "")
+        if not path.exists():
+            abort(404)
+        return send_file(
+            path,
+            as_attachment=True,
+            download_name=f"dossier-{project.id}.docx",
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+    if fmt == "pdf":
+        path = Path(project.output.final_dossier_pdf_path or "")
+        if not path.exists():
+            abort(404)
+        return send_file(
+            path,
+            as_attachment=True,
+            download_name=f"dossier-{project.id}.pdf",
+            mimetype="application/pdf",
+        )
+
+    abort(404)
 
 # TEMPLATES CRUD
 # ==============================================================================

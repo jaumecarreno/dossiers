@@ -49,6 +49,14 @@ Si falta información, no la rellenes de forma creativa.
 Usa un tono profesional, claro y comercial sin sonar exagerado.
 El resultado debe estar en Markdown.
 El idioma de salida es: {lang_str}.
+Incluye, salvo que las instrucciones de plantilla pidan algo incompatible, estas secciones:
+1. Objetivos.
+2. Resumen ejecutivo.
+3. Ideas clave.
+4. Citas destacadas.
+5. Acciones o recomendaciones.
+6. Preguntas abiertas.
+7. Conclusiones.
 Datos del proyecto:
 - Título: {title}
 - Cliente: {client_name or "No indicado"}

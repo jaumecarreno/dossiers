@@ -4,6 +4,7 @@ from collections import Counter
 from pathlib import Path
 import json
 import string
+import time
 
 from flask import current_app, has_app_context
 
@@ -14,7 +15,7 @@ from app.constants import (
 )
 from app.extensions import db
 from app.models import Project, ProjectLog, ProjectOutput, TranscriptChunk
-from app.services.export_service import markdown_to_docx
+from app.services.export_service import markdown_to_docx, markdown_to_pdf
 from app.services.media_service import (
     ensure_media_tools_available,
     get_media_duration,
@@ -26,6 +27,13 @@ from app.services.openai_service import (
     generate_final_dossier,
     summarize_chunk,
     transcribe_audio,
+)
+from app.services.quality_service import (
+    active_transcript,
+    build_output_variants,
+    build_quality_report,
+    glossary_terms_from_project,
+    json_dumps,
 )
 from app.services.transcript_import_service import load_transcript_texts_from_manifest
 from app.storage import project_audio_dir, project_chunks_dir, project_outputs_dir
@@ -82,6 +90,75 @@ def _friendly_error(exc: Exception) -> str:
     text = str(exc).strip() or exc.__class__.__name__
     first_line = text.splitlines()[0].strip()
     return first_line[:1200]
+
+
+def _finish_phase(metrics: dict, phase: str, started_at: float) -> None:
+    metrics.setdefault("phase_seconds", {})[phase] = round(time.monotonic() - started_at, 2)
+
+
+def _record_quality_report(project: Project, output: ProjectOutput, metrics: dict | None = None) -> None:
+    output.quality_report_json = json_dumps(build_quality_report(project, output, metrics))
+
+
+def _build_summary_for_transcript(transcript: str, language: str) -> str:
+    text_blocks = _split_text(transcript)
+    block_summaries = []
+    for index, block in enumerate(text_blocks, start=1):
+        summary = summarize_chunk(block, language)
+        block_summaries.append(f"## Bloque {index}\n\n{summary}")
+    if len(block_summaries) > 1:
+        global_summary = summarize_chunk("\n\n".join(block_summaries), language)
+        block_summaries.append(f"## Resumen global\n\n{global_summary}")
+    return "\n\n".join(block_summaries)
+
+
+def _write_project_exports(project: Project, output: ProjectOutput) -> None:
+    outputs_dir = project_outputs_dir(project.id)
+    markdown_path = outputs_dir / "dossier.md"
+    markdown_path.write_text(output.final_dossier_markdown or "", encoding="utf-8")
+    docx_path = outputs_dir / "dossier.docx"
+    markdown_to_docx(output.final_dossier_markdown or "", docx_path)
+    pdf_path = outputs_dir / "dossier.pdf"
+    markdown_to_pdf(output.final_dossier_markdown or "", pdf_path)
+    output.final_dossier_docx_path = str(docx_path)
+    output.final_dossier_pdf_path = str(pdf_path)
+    output.output_variants_json = json_dumps(
+        build_output_variants(output.final_dossier_markdown, output.block_summary)
+    )
+
+
+def regenerate_project_outputs(project: Project, target: str = "all") -> None:
+    output = ProjectOutput.query.filter_by(project_id=project.id).one_or_none()
+    if not output:
+        raise ValueError("El proyecto no tiene transcripcion para regenerar.")
+
+    transcript = active_transcript(output)
+    if not transcript:
+        raise ValueError("El proyecto no tiene transcripcion util para regenerar.")
+
+    if target in {"summary", "all"}:
+        _set_status(project, "summarizing", "Regenerando resumen desde la transcripcion revisada.")
+        output.block_summary = _build_summary_for_transcript(transcript, project.language)
+
+    if target in {"dossier", "all"}:
+        if not output.block_summary:
+            output.block_summary = _build_summary_for_transcript(transcript, project.language)
+        _set_status(project, "generating_dossier", "Regenerando dossier final.")
+        output.final_dossier_markdown = generate_final_dossier(
+            project,
+            transcript,
+            output.block_summary or "",
+        )
+
+    if target in {"exports", "dossier", "all"}:
+        if not output.final_dossier_markdown:
+            raise ValueError("No hay dossier final para exportar.")
+        _write_project_exports(project, output)
+
+    _record_quality_report(project, output, {"regenerated_target": target})
+    project.status = "completed"
+    db.session.add(ProjectLog(project_id=project.id, message=f"Regeneracion completada: {target}."))
+    db.session.commit()
 
 
 def _split_text(text: str, max_chars: int = 12000) -> list[str]:
@@ -142,6 +219,12 @@ def _build_transcription_prompt(project: Project, previous_text: str = "") -> st
         context_parts.append(f"Cliente u organización: {project.client_name}.")
     if project.event_name:
         context_parts.append(f"Evento: {project.event_name}.")
+    glossary_terms = glossary_terms_from_project(project)
+    if glossary_terms:
+        context_parts.append(
+            "Glosario fijado por el usuario (conservar grafia): "
+            f"{', '.join(glossary_terms)}"
+        )
     if previous_text:
         key_terms = _extract_key_terms(previous_text)
         if key_terms:
@@ -179,14 +262,18 @@ def _dedupe_overlap(
     return current_text
 
 
-def _append_transcript(transcripts: list[str], text: str) -> None:
+def _append_transcript(transcripts: list[str], text: str) -> int:
     cleaned = (text or "").strip()
     if not cleaned:
-        return
+        return 0
+    removed_words = 0
     if transcripts:
+        original_word_count = len(cleaned.split())
         cleaned = _dedupe_overlap("\n\n".join(transcripts), cleaned)
+        removed_words = max(0, original_word_count - len(cleaned.split()))
     if cleaned:
         transcripts.append(cleaned)
+    return removed_words
 
 
 def _build_full_transcript_from_transcript_files(project: Project) -> str:
@@ -207,7 +294,10 @@ def _build_full_transcript_from_transcript_files(project: Project) -> str:
     return full_transcript
 
 
-def _complete_project_from_transcript(project: Project, full_transcript: str) -> None:
+def _complete_project_from_transcript(
+    project: Project, full_transcript: str, metrics: dict | None = None
+) -> None:
+    metrics = metrics or {}
     output = ProjectOutput.query.filter_by(project_id=project.id).one_or_none()
     if not output:
         output = ProjectOutput(project_id=project.id)
@@ -216,38 +306,35 @@ def _complete_project_from_transcript(project: Project, full_transcript: str) ->
     db.session.commit()
 
     if not output.cleaned_transcript:
+        started_at = time.monotonic()
         _set_status(project, "cleaning_transcript", "Limpiando transcripcion.")
         output.cleaned_transcript = clean_transcript(full_transcript, project.language)
+        _finish_phase(metrics, "cleaning_transcript", started_at)
         db.session.commit()
 
     if not output.block_summary:
+        started_at = time.monotonic()
         _set_status(project, "summarizing", "Generando resumen por bloques.")
-        text_blocks = _split_text(output.cleaned_transcript or "")
-        block_summaries = []
-        for index, block in enumerate(text_blocks, start=1):
-            summary = summarize_chunk(block, project.language)
-            block_summaries.append(f"## Bloque {index}\n\n{summary}")
-        if len(block_summaries) > 1:
-            global_summary = summarize_chunk("\n\n".join(block_summaries), project.language)
-            block_summaries.append(f"## Resumen global\n\n{global_summary}")
-        output.block_summary = "\n\n".join(block_summaries)
+        output.block_summary = _build_summary_for_transcript(
+            output.reviewed_transcript or output.cleaned_transcript or "",
+            project.language,
+        )
+        _finish_phase(metrics, "summarizing", started_at)
         db.session.commit()
 
     if not output.final_dossier_markdown:
+        started_at = time.monotonic()
         _set_status(project, "generating_dossier", "Generando dossier final.")
         output.final_dossier_markdown = generate_final_dossier(
             project,
-            output.cleaned_transcript or "",
+            active_transcript(output),
             output.block_summary or "",
         )
+        _finish_phase(metrics, "generating_dossier", started_at)
         db.session.commit()
 
-    outputs_dir = project_outputs_dir(project.id)
-    markdown_path = outputs_dir / "dossier.md"
-    markdown_path.write_text(output.final_dossier_markdown or "", encoding="utf-8")
-    docx_path = outputs_dir / "dossier.docx"
-    markdown_to_docx(output.final_dossier_markdown or "", docx_path)
-    output.final_dossier_docx_path = str(docx_path)
+    _write_project_exports(project, output)
+    _record_quality_report(project, output, metrics)
     project.status = "completed"
     db.session.add(ProjectLog(project_id=project.id, message="Dossier completado."))
     db.session.commit()
@@ -257,17 +344,24 @@ def _process_project(project_id: int) -> None:
     project = Project.query.get(project_id)
     if not project:
         return
+    metrics: dict = {
+        "overlap_removed_words": 0,
+        "retryable_errors": 0,
+    }
 
     try:
         if project.source_kind == SOURCE_KIND_TRANSCRIPT_FILES:
+            started_at = time.monotonic()
             full_transcript = _build_full_transcript_from_transcript_files(project)
-            _complete_project_from_transcript(project, full_transcript)
+            _finish_phase(metrics, "importing_transcript", started_at)
+            _complete_project_from_transcript(project, full_transcript, metrics)
             return
 
         source_path = Path(project.source_file_path)
         audio_path = project_audio_dir(project.id) / "audio.mp3"
         chunk_minutes = current_app.config["TRANSCRIPT_CHUNK_MINUTES"]
 
+        started_at = time.monotonic()
         _set_status(project, "extracting_audio", "Preparando audio con ffmpeg.")
         ensure_media_tools_available()
         project.duration_seconds = get_media_duration(source_path)
@@ -281,8 +375,10 @@ def _process_project(project_id: int) -> None:
                 project,
                 f"Audio preparado para transcripcion ({_file_size_mb(audio_path):.1f} MB).",
             )
+        _finish_phase(metrics, "extracting_audio", started_at)
         db.session.commit()
 
+        started_at = time.monotonic()
         _set_status(project, "splitting_audio", "Dividiendo audio en fragmentos.")
         if not project.chunks:
             chunk_specs = split_audio(audio_path, project_chunks_dir(project.id), chunk_minutes)
@@ -300,7 +396,9 @@ def _process_project(project_id: int) -> None:
             db.session.commit()
             _add_project_log(project, f"Audio dividido en {len(chunk_specs)} fragmentos.")
             db.session.commit()
+        _finish_phase(metrics, "splitting_audio", started_at)
 
+        started_at = time.monotonic()
         _set_status(project, "transcribing", "Transcribiendo fragmentos con OpenAI.")
         transcripts: list[str] = []
         transcription_model = (
@@ -311,7 +409,9 @@ def _process_project(project_id: int) -> None:
         total_chunks = len(project.chunks)
         for chunk in project.chunks:
             if chunk.status == "completed" and chunk.transcript_text:
-                _append_transcript(transcripts, chunk.transcript_text)
+                metrics["overlap_removed_words"] += _append_transcript(
+                    transcripts, chunk.transcript_text
+                )
                 continue
                 
             chunk.status = "transcribing"
@@ -335,7 +435,9 @@ def _process_project(project_id: int) -> None:
                 chunk.transcript_text = text
                 chunk.segments_json = json.dumps(segments) if segments else None
                 chunk.status = "completed"
-                _append_transcript(transcripts, chunk.transcript_text or "")
+                metrics["overlap_removed_words"] += _append_transcript(
+                    transcripts, chunk.transcript_text or ""
+                )
                 _add_project_log(
                     project,
                     f"Fragmento {chunk.chunk_index}/{total_chunks} transcrito correctamente.",
@@ -348,10 +450,12 @@ def _process_project(project_id: int) -> None:
                 )
                 chunk.status = "failed"
                 chunk.error_message = message
+                metrics["retryable_errors"] += 1
                 _add_project_log(project, message, level="error")
                 db.session.commit()
                 raise RuntimeError(message) from exc
 
+        _finish_phase(metrics, "transcribing", started_at)
         full_transcript = "\n\n".join(transcripts).strip()
         output = ProjectOutput.query.filter_by(project_id=project.id).one_or_none()
         if not output:
@@ -361,38 +465,35 @@ def _process_project(project_id: int) -> None:
         db.session.commit()
 
         if not output.cleaned_transcript:
+            started_at = time.monotonic()
             _set_status(project, "cleaning_transcript", "Limpiando transcripcion.")
             output.cleaned_transcript = clean_transcript(full_transcript, project.language)
+            _finish_phase(metrics, "cleaning_transcript", started_at)
             db.session.commit()
 
         if not output.block_summary:
+            started_at = time.monotonic()
             _set_status(project, "summarizing", "Generando resumen por bloques.")
-            text_blocks = _split_text(output.cleaned_transcript or "")
-            block_summaries = []
-            for index, block in enumerate(text_blocks, start=1):
-                summary = summarize_chunk(block, project.language)
-                block_summaries.append(f"## Bloque {index}\n\n{summary}")
-            if len(block_summaries) > 1:
-                global_summary = summarize_chunk("\n\n".join(block_summaries), project.language)
-                block_summaries.append(f"## Resumen global\n\n{global_summary}")
-            output.block_summary = "\n\n".join(block_summaries)
+            output.block_summary = _build_summary_for_transcript(
+                output.reviewed_transcript or output.cleaned_transcript or "",
+                project.language,
+            )
+            _finish_phase(metrics, "summarizing", started_at)
             db.session.commit()
 
         if not output.final_dossier_markdown:
+            started_at = time.monotonic()
             _set_status(project, "generating_dossier", "Generando dossier final.")
             output.final_dossier_markdown = generate_final_dossier(
                 project,
-                output.cleaned_transcript or "",
+                active_transcript(output),
                 output.block_summary or "",
             )
+            _finish_phase(metrics, "generating_dossier", started_at)
             db.session.commit()
             
-        outputs_dir = project_outputs_dir(project.id)
-        markdown_path = outputs_dir / "dossier.md"
-        markdown_path.write_text(output.final_dossier_markdown or "", encoding="utf-8")
-        docx_path = outputs_dir / "dossier.docx"
-        markdown_to_docx(output.final_dossier_markdown or "", docx_path)
-        output.final_dossier_docx_path = str(docx_path)
+        _write_project_exports(project, output)
+        _record_quality_report(project, output, metrics)
         project.status = "completed"
         db.session.add(ProjectLog(project_id=project.id, message="Dossier completado."))
         db.session.commit()
@@ -402,6 +503,10 @@ def _process_project(project_id: int) -> None:
         if project:
             project.status = "failed"
             project.error_message = _friendly_error(exc)
+            output = ProjectOutput.query.filter_by(project_id=project.id).one_or_none()
+            if output:
+                metrics["last_error"] = project.error_message
+                _record_quality_report(project, output, metrics)
             db.session.add(
                 ProjectLog(
                     project_id=project.id,

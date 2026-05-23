@@ -18,7 +18,7 @@ from app.constants import (
 )
 from app.models import Project, ProjectOutput, Template, TranscriptChunk
 from app.extensions import db
-from app.services.export_service import get_transcript_content, markdown_to_docx, text_to_pdf
+from app.services.export_service import get_transcript_content, markdown_to_docx, markdown_to_pdf, text_to_pdf
 from app.services.media_service import (
     AudioChunk,
     CHUNK_OVERLAP_SECONDS,
@@ -59,6 +59,7 @@ def test_project_creation(client, app, monkeypatch):
             "event_name": "Evento",
             "language": "es",
             "template_id": str(t_id),
+            "glossary": "Acme Corp\nProducto X",
             "source_file": (io.BytesIO(b"fake audio"), "evento.mp3"),
         },
         content_type="multipart/form-data",
@@ -72,6 +73,7 @@ def test_project_creation(client, app, monkeypatch):
         assert project.source_filename == "evento.mp3"
         assert Path(project.source_file_path).exists()
         assert project.template_id == t_id
+        assert json.loads(project.glossary_json)["terms"] == ["Acme Corp", "Producto X"]
         assert project.transcription_model == DEFAULT_TRANSCRIPTION_MODEL
         assert enqueued == [project.id]
 
@@ -463,7 +465,10 @@ def test_shared_dossier_supports_dark_theme_toggle(client, app):
             status="completed",
             share_token="token-publico",
         )
-        project.output = ProjectOutput(final_dossier_markdown="# Título público")
+        project.output = ProjectOutput(
+            final_dossier_markdown="# Título público",
+            full_transcript="Transcripcion visible",
+        )
         db.session.add(project)
         db.session.commit()
 
@@ -475,7 +480,14 @@ def test_shared_dossier_supports_dark_theme_toggle(client, app):
     assert 'localStorage.getItem("dossiers-theme")' in html
     assert 'id="theme-toggle"' in html
     assert "Cambiar a tema claro" in html
+    assert "Markdown" in html
+    assert "Ver transcripcion" in html
+    assert "Transcripcion visible" in html
     assert "localStorage.setItem(\"dossiers-theme\", nextTheme)" in html
+
+    response = client.get("/p/token-publico/download/markdown")
+    assert response.status_code == 200
+    assert "# Título público" in response.get_data(as_text=True)
 
 
 def test_markdown_to_docx_creates_file(tmp_path):
@@ -531,6 +543,15 @@ def test_transcript_content_uses_time_ranges_before_paragraphs(app):
 def test_text_to_pdf_creates_pdf_file(tmp_path):
     output_path = tmp_path / "transcripcion.pdf"
     text_to_pdf("(0:00 - 0:11)\nTexto con acentos y preguntas: ¿qué tal?", output_path)
+
+    assert output_path.exists()
+    assert output_path.read_bytes().startswith(b"%PDF-1.4")
+    assert output_path.stat().st_size > 0
+
+
+def test_markdown_to_pdf_creates_dossier_pdf(tmp_path):
+    output_path = tmp_path / "dossier.pdf"
+    markdown_to_pdf("# Titulo\n\n## Resumen ejecutivo\n\n**Texto** final.", output_path)
 
     assert output_path.exists()
     assert output_path.read_bytes().startswith(b"%PDF-1.4")
@@ -693,6 +714,7 @@ def test_build_transcription_prompt_includes_key_terms(app):
             source_filename="evento.mp3",
             source_file_path="evento.mp3",
             language="es",
+            glossary_json=json.dumps({"terms": ["Producto Atlas", "Fundacion Norte"]}),
             status="transcribing",
         )
         previous = (
@@ -704,6 +726,8 @@ def test_build_transcription_prompt_includes_key_terms(app):
     assert "Vocabulario recurrente" in prompt
     assert "Martínez" in prompt
     assert "García" in prompt
+    assert "Producto Atlas" in prompt
+    assert "Fundacion Norte" in prompt
     assert "Jornada Innovation" in prompt
     assert "Acme Corp" in prompt
 
@@ -780,6 +804,14 @@ def test_process_project_imports_transcript_files_without_transcribing(app, tmp_
             == "apertura con nombres propios repetidos\n\ny cierre final"
         )
         assert project.output.final_dossier_docx_path
+        assert project.output.final_dossier_pdf_path
+        assert Path(project.output.final_dossier_pdf_path).exists()
+        quality = json.loads(project.output.quality_report_json)
+        assert quality["metrics"]["source_kind"] == SOURCE_KIND_TRANSCRIPT_FILES
+        assert quality["content"]["transcript_word_count"] > 0
+        variants = json.loads(project.output.output_variants_json)
+        assert variants["dossier_largo"] == "# Dossier"
+        assert "posts_redes" in variants
 
 
 def test_process_project_reports_failed_chunk_context(app, tmp_path, monkeypatch):
@@ -914,6 +946,81 @@ def test_process_project_uses_project_transcription_model(app, tmp_path, monkeyp
             project.output.full_transcript
             == "apertura con nombres propios repetidos\n\ny cierre final"
         )
+
+
+def test_reviewed_transcript_regeneration_uses_reviewed_text(client, app, tmp_path, monkeypatch):
+    monkeypatch.setattr("app.tasks.summarize_chunk", lambda text, _language: f"Resumen de {text}")
+    monkeypatch.setattr(
+        "app.tasks.generate_final_dossier",
+        lambda _project, transcript, _summary: (
+            "# Dossier\n\n## Resumen ejecutivo\n\n"
+            f"{transcript}\n\n## Ideas clave\n\n- Idea"
+        ),
+    )
+    monkeypatch.setattr(
+        "app.tasks.markdown_to_docx",
+        lambda _markdown, output_path: Path(output_path).write_bytes(b"docx"),
+    )
+    monkeypatch.setattr(
+        "app.tasks.markdown_to_pdf",
+        lambda _markdown, output_path: Path(output_path).write_bytes(b"%PDF-1.4\n"),
+    )
+
+    with app.app_context():
+        template = Template(name="Plantilla", prompt_instructions="- Seccion")
+        project = Project(
+            title="Jornada revisable",
+            source_filename="evento.mp3",
+            source_file_path="evento.mp3",
+            language="es",
+            template=template,
+            status="completed",
+        )
+        project.output = ProjectOutput(
+            full_transcript="Texto original",
+            cleaned_transcript="Texto limpio",
+            block_summary="Resumen antiguo",
+            final_dossier_markdown="# Antiguo",
+        )
+        db.session.add(project)
+        db.session.commit()
+        project_id = project.id
+
+    response = client.post(
+        f"/projects/{project_id}/transcript/review",
+        data={
+            "reviewed_transcript": "(0:00 - 0:05)\nTexto revisado con Speaker 1",
+            "glossary": "Speaker 1\nProducto Alfa",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        project = Project.query.get(project_id)
+        assert project.status == "reviewing_transcript"
+        assert "Texto revisado" in project.output.reviewed_transcript
+        assert json.loads(project.glossary_json)["terms"] == ["Speaker 1", "Producto Alfa"]
+
+    response = client.post(
+        f"/projects/{project_id}/regenerate",
+        data={"target": "all"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        project = Project.query.get(project_id)
+        assert project.status == "completed"
+        assert "Texto revisado con Speaker 1" in project.output.final_dossier_markdown
+        assert Path(project.output.final_dossier_docx_path).exists()
+        assert Path(project.output.final_dossier_pdf_path).exists()
+        assert json.loads(project.output.quality_report_json)["content"]["has_reviewed_transcript"]
+        assert json.loads(project.output.output_variants_json)["resumen_ejecutivo"]
+
+    response = client.get(f"/projects/{project_id}/download/pdf")
+    assert response.status_code == 200
+    assert response.data.startswith(b"%PDF-1.4")
 
 
 def test_openai_service_uses_mocked_client(app, tmp_path, monkeypatch):

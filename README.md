@@ -81,10 +81,20 @@ rq worker default --url "$REDIS_URL"
 ## Tests
 
 ```bash
+python -m pip install -r requirements.txt
 pytest
 ```
 
 Los tests no llaman a OpenAI real.
+
+Si prefieres aislar dependencias:
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -r requirements.txt
+python -m pytest
+```
 
 ## Flujo de uso
 
@@ -92,8 +102,20 @@ Los tests no llaman a OpenAI real.
 2. Seleccionar idioma, modelo de transcripción, plantilla y archivo.
 3. La app guarda el original y encola un job.
 4. El worker procesa audio, fragmentos por silencios, transcripción, resumen y dossier.
-5. La vista de detalle muestra estado y logs por HTMX.
-6. Al completar, se pueden descargar Markdown, DOCX y PDF.
+5. La vista de detalle muestra estado, logs e informe de calidad por HTMX.
+6. Al completar, se pueden revisar transcripción/glosario, regenerar resumen,
+   dossier o exportaciones sin repetir transcripción, y descargar Markdown,
+   DOCX y PDF.
+
+## Calidad y revisión
+
+- Cada procesamiento genera un informe interno con métricas de duración, chunks,
+  coste estimado, solapes eliminados y checks de secciones esperadas.
+- La transcripción puede editarse desde la vista de detalle; si hay versión
+  revisada, las regeneraciones usan esa versión.
+- El glosario del proyecto se incorpora al prompt de transcripción para preservar
+  nombres propios, empresas y terminología.
+- El enlace público incluye descargas y transcripción opcional cuando existe.
 
 ## Limitaciones actuales
 

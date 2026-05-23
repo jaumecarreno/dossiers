@@ -41,6 +41,12 @@ def _float_or_default(value, default: float) -> float:
 
 
 def get_transcript_content(project, include_timestamps: bool = False) -> str:
+    reviewed_transcript = ""
+    if project.output and project.output.reviewed_transcript:
+        reviewed_transcript = project.output.reviewed_transcript.strip()
+    if reviewed_transcript:
+        return reviewed_transcript
+
     if not include_timestamps or not project.chunks:
         if project.output and project.output.full_transcript:
             return project.output.full_transcript
@@ -264,6 +270,27 @@ def text_to_pdf(text: str, output_path: str | Path) -> Path:
 
     output.write_bytes(_build_pdf(objects))
     return output
+
+
+def markdown_to_pdf(markdown_text: str, output_path: str | Path) -> Path:
+    lines: list[str] = []
+    for raw_line in markdown_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            lines.append("")
+            continue
+        if line.startswith("#"):
+            line = _strip_markdown_inline(line.lstrip("#").strip())
+        elif line.startswith(("- ", "* ")):
+            line = "- " + _strip_markdown_inline(line[2:])
+        else:
+            numbered = re.match(r"^(\d+\.)\s+(.*)$", line)
+            if numbered:
+                line = f"{numbered.group(1)} {_strip_markdown_inline(numbered.group(2))}"
+            else:
+                line = _strip_markdown_inline(line)
+        lines.append(line)
+    return text_to_pdf("\n".join(lines), output_path)
 
 
 def _pdf_escape(text: str) -> str:

@@ -1,10 +1,16 @@
+{% set variants = json_loads_object(project.output.output_variants_json) %}
+{% set review_text = project.output.reviewed_transcript or get_transcript_content(project, include_timestamps=True) or project.output.cleaned_transcript or project.output.full_transcript or "" %}
+
 <section class="panel">
   <div class="status-header">
     <div>
       <p class="eyebrow">Resultado</p>
       <h2>Dossier final</h2>
+      {% if project.status == "reviewing_transcript" %}
+        <p class="muted">Hay una transcripcion revisada pendiente de aplicar. Regenera resumen y dossier para actualizar las salidas.</p>
+      {% endif %}
     </div>
-    <div class="actions">
+    <div class="actions actions-wrap">
       <a class="button button-primary" href="{{ url_for('main.download_markdown', project_id=project.id) }}">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
         Markdown
@@ -13,61 +19,120 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
         DOCX
       </a>
+      {% if project.output.final_dossier_pdf_path %}
+        <a class="button button-primary" href="{{ url_for('main.download_pdf', project_id=project.id) }}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+          PDF
+        </a>
+      {% endif %}
     </div>
   </div>
 
-  {# Tabs #}
+  <div class="regeneration-bar">
+    <form action="{{ url_for('main.regenerate_project', project_id=project.id) }}" method="post">
+      <input type="hidden" name="target" value="summary" />
+      <button class="button button-sm" type="submit">Regenerar resumen</button>
+    </form>
+    <form action="{{ url_for('main.regenerate_project', project_id=project.id) }}" method="post">
+      <input type="hidden" name="target" value="dossier" />
+      <button class="button button-sm" type="submit">Regenerar dossier</button>
+    </form>
+    <form action="{{ url_for('main.regenerate_project', project_id=project.id) }}" method="post">
+      <input type="hidden" name="target" value="exports" />
+      <button class="button button-sm" type="submit">Rehacer exportaciones</button>
+    </form>
+    <form action="{{ url_for('main.regenerate_project', project_id=project.id) }}" method="post">
+      <input type="hidden" name="target" value="all" />
+      <button class="button button-primary button-sm" type="submit">Actualizar todo</button>
+    </form>
+  </div>
+
   <div class="result-tabs" id="result-tabs">
     <button class="result-tab active" data-tab="dossier" type="button">Dossier</button>
     <button class="result-tab" data-tab="summary" type="button">Resumen</button>
-    <button class="result-tab" data-tab="transcript" type="button">Transcripción</button>
+    <button class="result-tab" data-tab="transcript" type="button">Transcripcion</button>
+    <button class="result-tab" data-tab="variants" type="button">Variantes</button>
   </div>
 
-  {# Dossier tab #}
   <div class="result-content active" id="tab-dossier">
     <div class="markdown-toggle">
       <button class="active" data-view="rendered" type="button">Formateado</button>
       <button data-view="raw" type="button">Markdown</button>
     </div>
     <div class="rendered-markdown" id="dossier-rendered"></div>
-    <pre style="display:none" id="dossier-raw">{{ project.output.final_dossier_markdown }}</pre>
+    <pre style="display:none" id="dossier-raw">{{ project.output.final_dossier_markdown or "" }}</pre>
   </div>
 
-  {# Summary tab #}
   <div class="result-content" id="tab-summary">
     <div class="markdown-toggle">
       <button class="active" data-view="rendered" type="button">Formateado</button>
       <button data-view="raw" type="button">Markdown</button>
     </div>
     <div class="rendered-markdown" id="summary-rendered"></div>
-    <pre style="display:none" id="summary-raw">{{ project.output.block_summary }}</pre>
+    <pre style="display:none" id="summary-raw">{{ project.output.block_summary or "" }}</pre>
   </div>
 
-  {# Transcript tab #}
   <div class="result-content" id="tab-transcript">
-    <div style="display: flex; gap: 1.5rem; align-items: center; margin-bottom: 1.5rem; background: var(--panel-soft); padding: 1rem; border-radius: 8px; border: 1px solid var(--line-soft); flex-wrap: wrap;">
-      <div style="flex: 1;">
-        <h3 style="margin-bottom: 0.2rem; font-size: 0.95rem;">Descargar Transcripción</h3>
-        <p class="muted" style="margin: 0; font-size: 0.85rem;">Exporta la transcripción original limpia.</p>
+    <div class="download-strip">
+      <div>
+        <h3>Transcripcion revisable</h3>
+        <p class="muted">Edita el texto, corrige hablantes o deja notas de tiempo antes de regenerar resumen y dossier.</p>
       </div>
-      <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.85rem; font-weight: 600;">
+      <label class="inline-check">
         <input type="checkbox" id="transcript-timestamps" value="true" />
         Incluir notas de tiempo
       </label>
-      <div class="actions" style="margin-top: 0;">
+      <div class="actions actions-wrap">
         <a class="button button-sm" id="btn-dl-md" href="{{ url_for('main.download_transcript', project_id=project.id, format='md') }}">Markdown</a>
         <a class="button button-sm" id="btn-dl-txt" href="{{ url_for('main.download_transcript', project_id=project.id, format='txt') }}">TXT</a>
         <a class="button button-sm" id="btn-dl-docx" href="{{ url_for('main.download_transcript', project_id=project.id, format='docx') }}">DOCX</a>
         <a class="button button-sm" id="btn-dl-pdf" href="{{ url_for('main.download_transcript', project_id=project.id, format='pdf') }}">PDF</a>
       </div>
     </div>
-    <pre>{{ project.output.cleaned_transcript }}</pre>
+
+    <form class="review-form" action="{{ url_for('main.save_transcript_review', project_id=project.id) }}" method="post">
+      <label>
+        <span>Glosario del proyecto</span>
+        <textarea name="glossary" rows="4" placeholder="Un termino por linea">{{ glossary_text_from_project(project) }}</textarea>
+      </label>
+      <label>
+        <span>Transcripcion revisada</span>
+        <textarea name="reviewed_transcript" rows="18" required>{{ review_text }}</textarea>
+      </label>
+      <div class="form-actions">
+        <button class="button button-primary" type="submit">Guardar revision</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="result-content" id="tab-variants">
+    {% if variants %}
+      <div class="variant-grid">
+        <section class="variant-block">
+          <h3>Resumen ejecutivo</h3>
+          <pre>{{ variants.resumen_ejecutivo or "" }}</pre>
+        </section>
+        <section class="variant-block">
+          <h3>Posts para redes</h3>
+          {% if variants.posts_redes %}
+            <ol>
+              {% for post in variants.posts_redes %}
+                <li>{{ post }}</li>
+              {% endfor %}
+            </ol>
+          {% else %}
+            <p class="muted">No hay posts generados.</p>
+          {% endif %}
+        </section>
+      </div>
+    {% else %}
+      <p class="muted">Regenera exportaciones para crear variantes reutilizables.</p>
+    {% endif %}
   </div>
 </section>
 
 <script>
   (() => {
-    // Render markdown
     if (typeof marked !== "undefined") {
       const dossierRaw = document.getElementById("dossier-raw");
       const summaryRaw = document.getElementById("summary-raw");
@@ -79,18 +144,19 @@
       }
     }
 
-    // Tab switching
-    document.getElementById("result-tabs").addEventListener("click", (e) => {
-      const btn = e.target.closest(".result-tab");
-      if (!btn) return;
-      document.querySelectorAll(".result-tab").forEach(t => t.classList.remove("active"));
-      document.querySelectorAll(".result-content").forEach(c => c.classList.remove("active"));
-      btn.classList.add("active");
-      const tab = document.getElementById("tab-" + btn.dataset.tab);
-      if (tab) tab.classList.add("active");
-    });
+    const tabs = document.getElementById("result-tabs");
+    if (tabs) {
+      tabs.addEventListener("click", (e) => {
+        const btn = e.target.closest(".result-tab");
+        if (!btn) return;
+        document.querySelectorAll(".result-tab").forEach(t => t.classList.remove("active"));
+        document.querySelectorAll(".result-content").forEach(c => c.classList.remove("active"));
+        btn.classList.add("active");
+        const tab = document.getElementById("tab-" + btn.dataset.tab);
+        if (tab) tab.classList.add("active");
+      });
+    }
 
-    // Markdown toggle (rendered vs raw)
     document.querySelectorAll(".markdown-toggle").forEach(toggle => {
       toggle.addEventListener("click", (e) => {
         const btn = e.target.closest("button");
@@ -98,10 +164,8 @@
         const parent = toggle.parentElement;
         const rendered = parent.querySelector(".rendered-markdown");
         const raw = parent.querySelector("pre");
-
         toggle.querySelectorAll("button").forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
-
         if (btn.dataset.view === "raw") {
           if (rendered) rendered.style.display = "none";
           if (raw) raw.style.display = "";
@@ -112,22 +176,17 @@
       });
     });
 
-    // Transcript timestamps toggle
     const tsCheckbox = document.getElementById("transcript-timestamps");
     if (tsCheckbox) {
       tsCheckbox.addEventListener("change", (e) => {
         const checked = e.target.checked;
         ["btn-dl-md", "btn-dl-txt", "btn-dl-docx", "btn-dl-pdf"].forEach(id => {
           const btn = document.getElementById(id);
-          if (btn) {
-            const url = new URL(btn.href);
-            if (checked) {
-              url.searchParams.set("timestamps", "true");
-            } else {
-              url.searchParams.delete("timestamps");
-            }
-            btn.href = url.toString();
-          }
+          if (!btn) return;
+          const url = new URL(btn.href);
+          if (checked) url.searchParams.set("timestamps", "true");
+          else url.searchParams.delete("timestamps");
+          btn.href = url.toString();
         });
       });
     }

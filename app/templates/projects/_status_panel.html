@@ -1,6 +1,7 @@
 {% if project.source_kind == "transcript_files" %}
   {% set steps = [
     ("importing_transcript", "Importar"),
+    ("reviewing_transcript", "Revisar"),
     ("cleaning_transcript", "Limpiar"),
     ("summarizing", "Resumir"),
     ("generating_dossier", "Generar"),
@@ -11,6 +12,7 @@
     ("extracting_audio", "Extraer audio"),
     ("splitting_audio", "Dividir"),
     ("transcribing", "Transcribir"),
+    ("reviewing_transcript", "Revisar"),
     ("cleaning_transcript", "Limpiar"),
     ("summarizing", "Resumir"),
     ("generating_dossier", "Generar"),
@@ -26,7 +28,7 @@
 
 <div
   id="project-status"
-  {% if project.status not in ["completed", "failed"] %}
+  {% if project.status not in ["completed", "failed", "reviewing_transcript"] %}
     hx-get="{{ url_for('main.project_status', project_id=project.id) }}"
     hx-trigger="every 4s"
     hx-swap="outerHTML"
@@ -139,7 +141,11 @@
     {% endif %}
   </section>
 
-  {% if project.status == "completed" and project.output %}
+  {% if project.status in ["completed", "failed", "reviewing_transcript"] and project.output %}
+    {% include "projects/_quality_report.html" %}
+  {% endif %}
+
+  {% if project.status in ["completed", "reviewing_transcript"] and project.output %}
     {% include "projects/_output_sections.html" %}
   {% endif %}
 </div>

@@ -39,6 +39,7 @@ class Project(TimestampMixin, db.Model):
     source_kind = db.Column(db.String(32), nullable=False, default="media")
     duration_seconds = db.Column(db.Integer, nullable=True)
     language = db.Column(db.String(8), nullable=False, default="auto")
+    glossary_json = db.Column(db.Text, nullable=True)
     transcription_model = db.Column(
         db.String(64), nullable=False, default="gpt-4o-transcribe"
     )
@@ -97,9 +98,13 @@ class ProjectOutput(TimestampMixin, db.Model):
     )
     full_transcript = db.Column(db.Text, nullable=True)
     cleaned_transcript = db.Column(db.Text, nullable=True)
+    reviewed_transcript = db.Column(db.Text, nullable=True)
     block_summary = db.Column(db.Text, nullable=True)
     final_dossier_markdown = db.Column(db.Text, nullable=True)
     final_dossier_docx_path = db.Column(db.String(1024), nullable=True)
+    final_dossier_pdf_path = db.Column(db.String(1024), nullable=True)
+    output_variants_json = db.Column(db.Text, nullable=True)
+    quality_report_json = db.Column(db.Text, nullable=True)
 
     project = db.relationship("Project", back_populates="output")
 

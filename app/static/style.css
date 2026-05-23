@@ -225,6 +225,10 @@ nav {
   gap: 0.6rem;
 }
 
+.actions-wrap {
+  flex-wrap: wrap;
+}
+
 nav a, nav button {
   display: inline-flex;
   align-items: center;
@@ -509,6 +513,7 @@ nav .button-primary:hover {
 .status-extracting_audio,
 .status-splitting_audio,
 .status-transcribing,
+.status-reviewing_transcript,
 .status-importing_transcript,
 .status-cleaning_transcript,
 .status-summarizing,
@@ -767,7 +772,7 @@ label span {
   font-weight: 600;
 }
 
-input, select {
+input, select, textarea {
   width: 100%;
   min-height: 2.6rem;
   padding: 0.6rem 0.8rem;
@@ -780,7 +785,11 @@ input, select {
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-input:focus, select:focus {
+textarea {
+  resize: vertical;
+}
+
+input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--input-focus);
   box-shadow: 0 0 0 3px var(--primary-glow);
@@ -1242,6 +1251,112 @@ pre {
   color: var(--primary-text);
 }
 
+.regeneration-bar,
+.download-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: 1rem 0 1.25rem;
+  padding: 0.85rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.download-strip > div:first-child {
+  flex: 1;
+  min-width: 220px;
+}
+
+.download-strip h3 {
+  margin-bottom: 0.15rem;
+  font-size: 0.95rem;
+}
+
+.download-strip p {
+  margin: 0;
+}
+
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.inline-check input {
+  width: auto;
+  min-height: auto;
+}
+
+.review-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.review-form textarea[name="reviewed_transcript"] {
+  min-height: 420px;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.variant-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.variant-block {
+  min-width: 0;
+}
+
+.variant-block h3 {
+  margin-bottom: 0.5rem;
+}
+
+.variant-block ol {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.variant-block li {
+  margin-bottom: 0.65rem;
+}
+
+.quality-grid {
+  margin-bottom: 1rem;
+}
+
+.quality-sections {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.quality-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.8rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.quality-chip-ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.quality-chip-missing {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 /* ========================================
    Table (fallback)
    ======================================== */
@@ -1351,6 +1466,10 @@ th {
     grid-template-columns: 1fr;
   }
 
+  .variant-grid {
+    grid-template-columns: 1fr;
+  }
+
   .logs li {
     grid-template-columns: 1fr;
   }
@@ -1417,6 +1536,10 @@ th {
   }
 
   .card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .variant-grid {
     grid-template-columns: 1fr;
   }
 

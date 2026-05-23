@@ -1,0 +1,53 @@
+{% set quality = json_loads_object(project.output.quality_report_json if project.output else None) %}
+{% if quality %}
+  <section class="panel">
+    <div class="status-header">
+      <div>
+        <p class="eyebrow">Calidad</p>
+        <h2>Informe interno</h2>
+      </div>
+    </div>
+
+    {% if quality.warnings %}
+      <div class="quality-warning-list">
+        {% for warning in quality.warnings %}
+          <div class="error-box">{{ warning }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <div class="meta-grid quality-grid">
+      <div>
+        <span>Palabras transcript</span>
+        <strong>{{ quality.content.transcript_word_count }}</strong>
+      </div>
+      <div>
+        <span>Chunks</span>
+        <strong>{{ quality.metrics.completed_chunk_count }}/{{ quality.metrics.chunk_count }}</strong>
+      </div>
+      <div>
+        <span>Coste estimado</span>
+        {% set estimated_cost = quality.metrics.estimated_transcription_cost_usd|default(none) %}
+        <strong>
+          {% if estimated_cost is not none %}
+            US${{ "%.3f"|format(estimated_cost) }}
+          {% else %}
+            No aplica
+          {% endif %}
+        </strong>
+      </div>
+      <div>
+        <span>Solape eliminado</span>
+        <strong>{{ quality.metrics.overlap_removed_words|default(0) }} palabras</strong>
+      </div>
+    </div>
+
+    <div class="quality-sections">
+      {% for item in quality.checks.expected_sections %}
+        <span class="quality-chip {{ 'quality-chip-ok' if item.present else 'quality-chip-missing' }}">
+          {{ item.name }}
+        </span>
+      {% endfor %}
+    </div>
+  </section>
+{% endif %}
