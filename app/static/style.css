@@ -1257,16 +1257,18 @@ th {
 
 @media (max-width: 768px) {
   body {
-    flex-direction: column;
+    flex-direction: column !important;
   }
   
   .sidebar {
-    position: fixed;
+    position: fixed !important;
     left: 0;
     top: 0;
     transform: translateX(-100%);
     width: 280px;
     box-shadow: var(--card-shadow-hover);
+    height: 100vh !important;
+    z-index: 1000 !important;
   }
 
   .sidebar.open {
@@ -1274,12 +1276,12 @@ th {
   }
 
   .sidebar-overlay.open {
-    display: block;
-    opacity: 1;
+    display: block !important;
+    opacity: 1 !important;
   }
   
   .mobile-header {
-    display: flex;
+    display: flex !important;
   }
 
   .page-header,
