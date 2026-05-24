@@ -542,6 +542,41 @@ def test_template_create_route(client, app):
         assert template.prompt_instructions == "- Sección"
 
 
+def test_migration_adds_chronicle_template_as_non_default(monkeypatch):
+    import importlib
+
+    migration = importlib.import_module("migrations.versions.0010_add_chronicle_template")
+    inserted_rows = []
+
+    class FakeResult:
+        def scalar(self):
+            return 0
+
+    class FakeBind:
+        def execute(self, *_args, **_kwargs):
+            return FakeResult()
+
+    class FakeOp:
+        def get_bind(self):
+            return FakeBind()
+
+        def bulk_insert(self, _table, rows):
+            inserted_rows.extend(rows)
+
+    monkeypatch.setattr(migration, "op", FakeOp())
+
+    migration.upgrade()
+
+    assert migration.down_revision == "0009"
+    assert inserted_rows
+    row = inserted_rows[0]
+    assert row["name"] == "Crónica temática de ponencia"
+    assert row["is_default"] is False
+    assert "crónica-resumen de la ponencia" in row["prompt_instructions"]
+    assert "No hagas un dossier corporativo" in row["prompt_instructions"]
+    assert "entre 8 y 14 bloques temáticos" in row["prompt_instructions"]
+
+
 def test_status_flow_helpers():
     assert get_project_progress("uploaded") == 0
     assert get_project_progress("completed") == 100
