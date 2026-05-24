@@ -8,13 +8,16 @@ from flask import (
     Blueprint,
     Response,
     abort,
+    current_app,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
     send_file,
     url_for,
 )
+from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
 from app.constants import (
@@ -57,6 +60,52 @@ def add_project_log(project_id: int, message: str, level: str = "info") -> None:
     db.session.add(ProjectLog(project_id=project_id, level=level, message=message))
 
 
+def _wants_json_response() -> bool:
+    return request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+
+def _form_error(message: str, status_code: int = 400):
+    if _wants_json_response():
+        return jsonify({"ok": False, "error": message}), status_code
+    flash(message, "error")
+    return redirect(url_for("main.new_project"))
+
+
+def _create_project_success(project: Project, message: str):
+    detail_url = url_for("main.project_detail", project_id=project.id)
+    if _wants_json_response():
+        return jsonify({"ok": True, "message": message, "redirect_url": detail_url}), 201
+    flash(message, "success")
+    return redirect(detail_url)
+
+
+def _create_project_failure(project: Project, message: str, status_code: int = 500):
+    detail_url = url_for("main.project_detail", project_id=project.id)
+    if _wants_json_response():
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": message,
+                    "redirect_url": detail_url,
+                }
+            ),
+            status_code,
+        )
+    flash(message, "error")
+    return redirect(detail_url)
+
+
+@bp.app_errorhandler(RequestEntityTooLarge)
+def request_entity_too_large(_exc: RequestEntityTooLarge):
+    max_upload_mb = current_app.config.get("MAX_UPLOAD_MB")
+    message = f"El archivo supera el limite de subida configurado ({max_upload_mb} MB)."
+    if _wants_json_response():
+        return jsonify({"ok": False, "error": message}), 413
+    flash(message, "error")
+    return redirect(url_for("main.new_project"))
+
+
 def get_estimated_time(project) -> str | None:
     if project.status in ("completed", "failed"):
         return None
@@ -92,6 +141,7 @@ def _template_context() -> dict:
         "glossary_text_from_project": glossary_text_from_project,
         "get_transcript_content": get_transcript_content,
         "json_loads_object": json_loads_object,
+        "max_upload_mb": current_app.config["MAX_UPLOAD_MB"],
     }
 
 
@@ -180,49 +230,39 @@ def create_project():
         if file and file.filename
     ]
     if not title:
-        flash("El título es obligatorio.", "error")
-        return redirect(url_for("main.new_project"))
+        return _form_error("El titulo es obligatorio.")
     if not is_valid_language(language):
-        flash("Idioma no válido.", "error")
-        return redirect(url_for("main.new_project"))
+        return _form_error("Idioma no valido.")
     if not is_valid_transcription_model(transcription_model):
-        flash("Modelo de transcripción no válido.", "error")
-        return redirect(url_for("main.new_project"))
+        return _form_error("Modelo de transcripcion no valido.")
     if not template_id_str or not template_id_str.isdigit():
-        flash("Plantilla no válida.", "error")
-        return redirect(url_for("main.new_project"))
+        return _form_error("Plantilla no valida.")
     
     template = Template.query.get(int(template_id_str))
     if not template:
-        flash("La plantilla seleccionada no existe.", "error")
-        return redirect(url_for("main.new_project"))
+        return _form_error("La plantilla seleccionada no existe.")
 
     if source_mode not in {SOURCE_KIND_MEDIA, SOURCE_KIND_TRANSCRIPT_FILES}:
-        flash("Tipo de origen no valido.", "error")
-        return redirect(url_for("main.new_project"))
+        return _form_error("Tipo de origen no valido.")
 
     source_kind = SOURCE_KIND_MEDIA
     if source_mode == SOURCE_KIND_TRANSCRIPT_FILES:
         source_kind = SOURCE_KIND_TRANSCRIPT_FILES
         if not transcript_uploads:
-            flash("Sube al menos un archivo de transcripcion.", "error")
-            return redirect(url_for("main.new_project"))
+            return _form_error("Sube al menos un archivo de transcripcion.")
         invalid_transcripts = [
             file.filename
             for file in transcript_uploads
             if not allowed_transcript_file(file.filename)
         ]
         if invalid_transcripts:
-            flash("Tipo de transcripcion no permitido.", "error")
-            return redirect(url_for("main.new_project"))
+            return _form_error("Tipo de transcripcion no permitido.")
         filename = _source_filename_summary([file.filename for file in transcript_uploads])
     else:
         if not upload or not upload.filename:
-            flash("Selecciona un archivo de audio o vídeo.", "error")
-            return redirect(url_for("main.new_project"))
+            return _form_error("Selecciona un archivo de audio o video.")
         if not allowed_file(upload.filename):
-            flash("Tipo de archivo no permitido.", "error")
-            return redirect(url_for("main.new_project"))
+            return _form_error("Tipo de archivo no permitido.")
         filename = secure_filename(upload.filename)
     project = Project(
         title=title,
@@ -248,8 +288,7 @@ def create_project():
             source_path = _save_transcript_uploads(project.id, transcript_uploads)
         except ValueError as exc:
             db.session.rollback()
-            flash(str(exc), "error")
-            return redirect(url_for("main.new_project"))
+            return _form_error(str(exc))
     else:
         upload.save(source_path)
 
@@ -265,11 +304,9 @@ def create_project():
         project.error_message = f"No se pudo encolar el proyecto: {exc}"
         add_project_log(project.id, project.error_message, level="error")
         db.session.commit()
-        flash(project.error_message, "error")
+        return _create_project_failure(project, project.error_message)
     else:
-        flash("Proyecto creado y encolado.", "success")
-
-    return redirect(url_for("main.project_detail", project_id=project.id))
+        return _create_project_success(project, "Proyecto creado y encolado.")
 
 
 @bp.get("/projects/<int:project_id>")

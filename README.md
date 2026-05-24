@@ -43,7 +43,8 @@ descargable.
 - `DATABASE_URL`: URL SQLAlchemy para PostgreSQL.
 - `REDIS_URL`: conexión Redis para RQ.
 - `STORAGE_ROOT`: carpeta base de archivos, por defecto `/storage`.
-- `MAX_UPLOAD_MB`: límite de subida, por defecto `2000`.
+- `MAX_UPLOAD_MB`: limite de subida, por defecto `10000`.
+- `GUNICORN_TIMEOUT`: segundos antes de cortar una peticion larga, por defecto `1800`.
 - `PORT`: puerto web, por defecto `3000`.
 - `OPENAI_API_KEY`: API key de OpenAI.
 - `OPENAI_TRANSCRIPTION_MODEL`: por defecto `gpt-4o-transcribe`.

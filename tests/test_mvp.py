@@ -258,7 +258,37 @@ def test_new_project_defaults_language_to_spanish(client):
     assert 'name="source_mode" value="transcript_files"' in html
     assert 'name="transcript_files"' in html
     assert ".txt,.md,.docx,.srt,.vtt" in html
+    assert 'id="upload-progress-bar"' in html
+    assert 'id="upload-error"' in html
+    assert "XMLHttpRequest" in html
     assert "0.003" in html
+
+
+def test_project_creation_ajax_returns_json_validation_error(client):
+    response = client.post(
+        "/projects",
+        data={},
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    assert response.status_code == 400
+    assert response.json == {"ok": False, "error": "El titulo es obligatorio."}
+
+
+def test_project_creation_ajax_reports_upload_too_large(client, app):
+    app.config["MAX_CONTENT_LENGTH"] = 1
+    app.config["MAX_UPLOAD_MB"] = 0
+
+    response = client.post(
+        "/projects",
+        data={"title": "Archivo grande", "source_file": (io.BytesIO(b"too-large"), "evento.mp3")},
+        content_type="multipart/form-data",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    assert response.status_code == 413
+    assert response.json["ok"] is False
+    assert "limite de subida" in response.json["error"]
 
 
 def test_project_creation_rejects_invalid_transcription_model(client, app, monkeypatch):

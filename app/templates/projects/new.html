@@ -10,6 +10,8 @@
     </div>
   </section>
 
+  <div class="upload-error-box" id="upload-error" role="alert" hidden></div>
+
   <form class="panel form" id="create-form" action="{{ url_for('main.create_project') }}" method="post" enctype="multipart/form-data">
     <label>
       <span>Título</span>
@@ -91,7 +93,7 @@
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
           </div>
           <p class="drop-zone-text"><strong>Arrastra tu archivo aquí</strong> o haz clic para seleccionar</p>
-          <p class="drop-zone-hint">MP4, MOV, MP3, WAV, M4A, WEBM — máx. 10 GB</p>
+          <p class="drop-zone-hint">MP4, MOV, MP3, WAV, M4A, WEBM - max. {{ max_upload_mb }} MB</p>
         </div>
         <div class="file-preview" id="file-preview">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><path d="M14 2v6h6"/></svg>
@@ -135,7 +137,11 @@
     <div class="upload-overlay-content">
       <div class="upload-spinner"></div>
       <h3>Subiendo archivos...</h3>
-      <p class="muted">Esto puede tardar unos minutos para archivos grandes.</p>
+      <strong class="upload-progress-value" id="upload-progress-value">0%</strong>
+      <div class="upload-progress" aria-hidden="true">
+        <div id="upload-progress-bar"></div>
+      </div>
+      <p class="muted" id="upload-status">Preparando subida...</p>
     </div>
   </div>
 
@@ -152,7 +158,11 @@
       const fileName = document.getElementById("file-name");
       const fileSize = document.getElementById("file-size");
       const fileRemove = document.getElementById("file-remove");
+      const uploadError = document.getElementById("upload-error");
       const overlay = document.getElementById("upload-overlay");
+      const uploadProgressBar = document.getElementById("upload-progress-bar");
+      const uploadProgressValue = document.getElementById("upload-progress-value");
+      const uploadStatus = document.getElementById("upload-status");
       const submitBtn = document.getElementById("submit-btn");
       const transcriptionModel = form.elements.transcription_model;
       const costValue = document.getElementById("transcription-cost-value");
@@ -171,6 +181,47 @@
         if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
         if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + " MB";
         return (bytes / 1073741824).toFixed(2) + " GB";
+      }
+
+      function clearUploadError() {
+        uploadError.hidden = true;
+        uploadError.textContent = "";
+      }
+
+      function showUploadError(message) {
+        overlay.classList.remove("visible");
+        submitBtn.disabled = false;
+        uploadError.textContent = message;
+        uploadError.hidden = false;
+        uploadError.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+
+      function setUploadProgress(percent, status) {
+        const safePercent = Math.max(0, Math.min(100, Math.round(percent)));
+        uploadProgressBar.style.width = `${safePercent}%`;
+        uploadProgressValue.textContent = `${safePercent}%`;
+        uploadStatus.textContent = status;
+      }
+
+      function responseError(xhr) {
+        let message = "";
+        try {
+          const data = JSON.parse(xhr.responseText || "{}");
+          message = data.error || data.message || "";
+        } catch (_error) {
+          message = "";
+        }
+        if (!message) {
+          const text = (xhr.responseText || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+          message = text ? text.slice(0, 500) : xhr.statusText;
+        }
+        if (xhr.status === 502) {
+          return "Bad Gateway durante la subida. Es probable que el proxy o Gunicorn haya cortado la conexion por timeout o limite de tamano. Detalle: " + (message || "HTTP 502");
+        }
+        if (xhr.status === 413) {
+          return "El archivo supera el limite de subida configurado. Detalle: " + (message || "HTTP 413");
+        }
+        return `Error de subida (HTTP ${xhr.status || "sin respuesta"}): ${message || "sin detalle del servidor"}`;
       }
 
       function formatDuration(seconds) {
@@ -349,23 +400,70 @@
       updateSourceMode();
 
       form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        clearUploadError();
         const transcriptMode = currentSourceMode() === "transcript_files";
         const hasFile = fileInput.files.length > 0;
         const hasTranscriptFiles = transcriptInput.files.length > 0;
         if (transcriptMode && !hasTranscriptFiles) {
-          e.preventDefault();
-          alert("Sube al menos un archivo de transcripción.");
-          submitBtn.disabled = false;
+          showUploadError("Sube al menos un archivo de transcripcion.");
           return;
         }
         if (!transcriptMode && !hasFile) {
-          e.preventDefault();
-          alert("Selecciona un archivo de audio o vídeo.");
-          submitBtn.disabled = false;
+          showUploadError("Selecciona un archivo de audio o video.");
           return;
         }
         submitBtn.disabled = true;
         overlay.classList.add("visible");
+        setUploadProgress(0, "Preparando subida...");
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", form.action);
+        xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
+
+        xhr.upload.addEventListener("progress", (event) => {
+          if (!event.lengthComputable) {
+            setUploadProgress(0, "Subiendo archivo...");
+            return;
+          }
+          const percent = Math.round((event.loaded / event.total) * 100);
+          const loaded = formatSize(event.loaded);
+          const total = formatSize(event.total);
+          setUploadProgress(percent, `Subidos ${loaded} de ${total}`);
+        });
+
+        xhr.addEventListener("load", () => {
+          let data = null;
+          try {
+            data = JSON.parse(xhr.responseText || "{}");
+          } catch (_error) {
+            data = null;
+          }
+
+          if (xhr.status >= 200 && xhr.status < 300 && data && data.ok) {
+            setUploadProgress(100, "Subida completada. Abriendo el proyecto...");
+            window.location.href = data.redirect_url;
+            return;
+          }
+
+          if (xhr.status >= 200 && xhr.status < 300 && xhr.responseURL) {
+            setUploadProgress(100, "Subida completada. Abriendo el proyecto...");
+            window.location.href = xhr.responseURL;
+            return;
+          }
+
+          showUploadError(responseError(xhr));
+        });
+
+        xhr.addEventListener("error", () => {
+          showUploadError("No se pudo completar la subida. Revisa la conexion o los logs del servidor.");
+        });
+
+        xhr.addEventListener("abort", () => {
+          showUploadError("La subida se cancelo antes de completarse.");
+        });
+
+        xhr.send(new FormData(form));
       });
     })();
   </script>

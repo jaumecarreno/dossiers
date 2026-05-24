@@ -1051,6 +1051,7 @@ input:focus, select:focus, textarea:focus {
   background: var(--panel);
   box-shadow: 0 25px 50px rgba(0,0,0,0.25);
   text-align: center;
+  width: min(460px, 90vw);
 }
 
 .upload-spinner {
@@ -1064,6 +1065,43 @@ input:focus, select:focus, textarea:focus {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+.upload-progress-value {
+  color: var(--text);
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.upload-progress {
+  width: 100%;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--progress-bg);
+}
+
+.upload-progress div {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--primary), var(--accent));
+  transition: width 0.2s ease;
+}
+
+.upload-error-box {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--error-line);
+  border-radius: 8px;
+  background: var(--error-bg);
+  color: var(--danger);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.upload-error-box[hidden] {
+  display: none;
 }
 
 /* ========================================

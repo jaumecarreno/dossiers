@@ -1,7 +1,7 @@
 services:
   web:
     build: .
-    command: sh -c "alembic upgrade head && gunicorn 'app:create_app()' --bind 0.0.0.0:$${PORT:-3000}"
+    command: sh -c "alembic upgrade head && gunicorn 'app:create_app()' --bind 0.0.0.0:$${PORT:-3000} --timeout $${GUNICORN_TIMEOUT:-1800}"
     env_file:
       - .env
     environment:
@@ -9,6 +9,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       STORAGE_ROOT: /storage
       PORT: 3000
+      GUNICORN_TIMEOUT: 1800
     ports:
       - "3000:3000"
     volumes:
