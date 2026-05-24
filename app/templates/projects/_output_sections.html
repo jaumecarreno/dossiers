@@ -28,20 +28,43 @@
     </div>
   </div>
 
+  <div class="result-help-grid" aria-label="Explicacion de resultados">
+    <article>
+      <strong>Dossier</strong>
+      <p>Salida final generada con la plantilla elegida.</p>
+    </article>
+    <article>
+      <strong>Resumen</strong>
+      <p>Resumen por bloques creado desde la transcripcion activa.</p>
+    </article>
+    <article>
+      <strong>Transcripcion</strong>
+      <p>Texto revisable. El glosario fija nombres y terminos, pero guardar cambios no actualiza el dossier hasta regenerar.</p>
+    </article>
+    <article>
+      <strong>Variantes</strong>
+      <p>Contenidos derivados del dossier y las exportaciones; no son una segunda generacion IA.</p>
+    </article>
+  </div>
+
   <div class="regeneration-bar">
-    <form action="{{ url_for('main.regenerate_project', project_id=project.id) }}" method="post">
+    <div class="regeneration-help">
+      <strong>Acciones de regeneracion</strong>
+      <p>Usalas cuando revises la transcripcion, cambies una plantilla o falten archivos descargables.</p>
+    </div>
+    <form action="{{ url_for('main.regenerate_project', project_id=project.id) }}" method="post" data-regenerate-form data-confirm-title="Regenerar resumen" data-confirm-body="Recalcula solo el resumen desde la transcripcion activa. No cambia el dossier final ni las descargas existentes.">
       <input type="hidden" name="target" value="summary" />
       <button class="button button-sm" type="submit">Regenerar resumen</button>
     </form>
-    <form action="{{ url_for('main.regenerate_project', project_id=project.id) }}" method="post">
+    <form action="{{ url_for('main.regenerate_project', project_id=project.id) }}" method="post" data-regenerate-form data-confirm-title="Regenerar dossier" data-confirm-body="Vuelve a generar el dossier con IA usando la transcripcion activa y el resumen actual. Tambien rehace las exportaciones.">
       <input type="hidden" name="target" value="dossier" />
       <button class="button button-sm" type="submit">Regenerar dossier</button>
     </form>
-    <form action="{{ url_for('main.regenerate_project', project_id=project.id) }}" method="post">
+    <form action="{{ url_for('main.regenerate_project', project_id=project.id) }}" method="post" data-regenerate-form data-confirm-title="Rehacer exportaciones" data-confirm-body="No llama a la IA. Rehace Markdown, DOCX, PDF y variantes desde el dossier existente.">
       <input type="hidden" name="target" value="exports" />
       <button class="button button-sm" type="submit">Rehacer exportaciones</button>
     </form>
-    <form action="{{ url_for('main.regenerate_project', project_id=project.id) }}" method="post">
+    <form action="{{ url_for('main.regenerate_project', project_id=project.id) }}" method="post" data-regenerate-form data-confirm-title="Actualizar todo" data-confirm-body="Recalcula resumen, genera de nuevo el dossier y rehace exportaciones. Es la opcion recomendada despues de corregir la transcripcion.">
       <input type="hidden" name="target" value="all" />
       <button class="button button-primary button-sm" type="submit">Actualizar todo</button>
     </form>
@@ -63,6 +86,7 @@
   </div>
 
   <div class="result-content active" id="tab-dossier">
+    <p class="tab-help">El dossier final es la version redactada con la plantilla seleccionada y lista para descargar.</p>
     <div class="markdown-toggle">
       <button class="active" data-view="rendered" type="button">Formateado</button>
       <button data-view="raw" type="button">Markdown</button>
@@ -72,6 +96,7 @@
   </div>
 
   <div class="result-content" id="tab-summary">
+    <p class="tab-help">El resumen se crea por bloques desde la transcripcion activa y alimenta la generacion del dossier.</p>
     <div class="markdown-toggle">
       <button class="active" data-view="rendered" type="button">Formateado</button>
       <button data-view="raw" type="button">Markdown</button>
@@ -114,6 +139,7 @@
   </div>
 
   <div class="result-content" id="tab-variants">
+    <p class="tab-help">Las variantes son materiales reutilizables derivados del dossier/exportaciones. No se redactan con una segunda llamada a la IA.</p>
     {% if variants %}
       <div class="variant-grid">
         <section class="variant-block">
@@ -138,6 +164,17 @@
     {% endif %}
   </div>
 </section>
+
+<div class="confirm-dialog" id="regenerate-dialog" aria-hidden="true">
+  <div class="confirm-dialog-content">
+    <h3 id="regenerate-dialog-title">Confirmar regeneracion</h3>
+    <p id="regenerate-dialog-body">Esta accion actualizara salidas del proyecto.</p>
+    <div class="confirm-dialog-actions">
+      <button class="button" type="button" id="regenerate-cancel">Cancelar</button>
+      <button class="button button-primary" type="button" id="regenerate-confirm">Aceptar y ejecutar</button>
+    </div>
+  </div>
+</div>
 
 <script>
   (() => {
@@ -196,6 +233,48 @@
           else url.searchParams.delete("timestamps");
           btn.href = url.toString();
         });
+      });
+    }
+
+    const regenerateDialog = document.getElementById("regenerate-dialog");
+    const regenerateTitle = document.getElementById("regenerate-dialog-title");
+    const regenerateBody = document.getElementById("regenerate-dialog-body");
+    const regenerateCancel = document.getElementById("regenerate-cancel");
+    const regenerateConfirm = document.getElementById("regenerate-confirm");
+    let pendingRegenerateForm = null;
+
+    const closeRegenerateDialog = () => {
+      pendingRegenerateForm = null;
+      if (regenerateDialog) {
+        regenerateDialog.classList.remove("visible");
+        regenerateDialog.setAttribute("aria-hidden", "true");
+      }
+    };
+
+    document.querySelectorAll("[data-regenerate-form]").forEach(form => {
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        pendingRegenerateForm = form;
+        if (regenerateTitle) regenerateTitle.textContent = form.dataset.confirmTitle || "Confirmar regeneracion";
+        if (regenerateBody) regenerateBody.textContent = form.dataset.confirmBody || "Esta accion actualizara salidas del proyecto.";
+        if (regenerateDialog) {
+          regenerateDialog.classList.add("visible");
+          regenerateDialog.setAttribute("aria-hidden", "false");
+        }
+      });
+    });
+
+    if (regenerateCancel) {
+      regenerateCancel.addEventListener("click", closeRegenerateDialog);
+    }
+    if (regenerateConfirm) {
+      regenerateConfirm.addEventListener("click", () => {
+        if (pendingRegenerateForm) pendingRegenerateForm.submit();
+      });
+    }
+    if (regenerateDialog) {
+      regenerateDialog.addEventListener("click", (e) => {
+        if (e.target === regenerateDialog) closeRegenerateDialog();
       });
     }
   })();

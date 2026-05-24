@@ -707,6 +707,55 @@ nav .button-primary:hover {
 /* ========================================
    Logs
    ======================================== */
+.logs-toggle summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.logs-toggle summary::-webkit-details-marker {
+  display: none;
+}
+
+.logs-toggle summary::after {
+  content: "+";
+  display: inline-grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.logs-toggle[open] summary::after {
+  content: "-";
+}
+
+.logs-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text);
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.logs-summary {
+  flex: 1;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.logs-body {
+  margin-top: 1rem;
+}
+
 .logs {
   display: grid;
   gap: 0.4rem;
@@ -1289,6 +1338,40 @@ pre {
   color: var(--primary-text);
 }
 
+.result-help-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0 1.25rem;
+}
+
+.result-help-grid article {
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.result-help-grid strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.88rem;
+}
+
+.result-help-grid p,
+.regeneration-help p,
+.tab-help {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.tab-help {
+  margin-bottom: 0.85rem;
+}
+
 .regeneration-bar,
 .download-strip {
   display: flex;
@@ -1300,6 +1383,17 @@ pre {
   border: 1px solid var(--line-soft);
   border-radius: 8px;
   background: var(--panel-soft);
+}
+
+.regeneration-help {
+  flex: 1 1 260px;
+  min-width: 220px;
+}
+
+.regeneration-help strong {
+  display: block;
+  margin-bottom: 0.15rem;
+  font-size: 0.9rem;
 }
 
 .download-strip > div:first-child {
@@ -1363,6 +1457,12 @@ pre {
 
 .variant-block li {
   margin-bottom: 0.65rem;
+}
+
+@media (max-width: 980px) {
+  .result-help-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .quality-grid {
@@ -1534,6 +1634,10 @@ th {
   width: 90%;
 }
 
+#regenerate-dialog .confirm-dialog-content {
+  max-width: 480px;
+}
+
 .confirm-dialog-content h3 {
   margin-bottom: 0.5rem;
 }
@@ -1595,6 +1699,14 @@ th {
 
   .variant-grid {
     grid-template-columns: 1fr;
+  }
+
+  .result-help-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .logs-toggle summary {
+    align-items: flex-start;
   }
 
   .logs li {
@@ -1668,6 +1780,14 @@ th {
 
   .variant-grid {
     grid-template-columns: 1fr;
+  }
+
+  .result-help-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .logs-toggle summary {
+    align-items: flex-start;
   }
 
   .logs li {

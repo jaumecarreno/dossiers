@@ -16,7 +16,7 @@ from app.constants import (
     estimate_transcription_cost_usd,
     get_project_progress,
 )
-from app.models import Project, ProjectOutput, Template, TranscriptChunk
+from app.models import Project, ProjectLog, ProjectOutput, Template, TranscriptChunk
 from app.extensions import db
 from app.services.export_service import get_transcript_content, markdown_to_docx, markdown_to_pdf, text_to_pdf
 from app.services.media_service import (
@@ -654,6 +654,105 @@ def test_project_detail_completed_shows_ai_verification_button(client, app):
     assert response.status_code == 200
     assert "Verificar con IA" in html
     assert f"/projects/{project_id}/verify-dossier" in html
+
+
+def _logs_details_tag(html: str) -> str:
+    start = html.index('<details class="logs-toggle"')
+    end = html.index(">", start)
+    return html[start : end + 1]
+
+
+def test_project_detail_completed_explains_outputs_and_regeneration_actions(client, app):
+    with app.app_context():
+        project = Project(
+            title="Jornada explicada",
+            source_filename="evento.mp3",
+            source_file_path="evento.mp3",
+            language="es",
+            status="completed",
+        )
+        project.output = ProjectOutput(
+            full_transcript="La ponente explico el plan.",
+            cleaned_transcript="La ponente explico el plan.",
+            block_summary="Resumen por bloques.",
+            final_dossier_markdown="# Dossier\n\nLa ponente explico el plan.",
+        )
+        db.session.add(project)
+        db.session.commit()
+        project_id = project.id
+
+    response = client.get(f"/projects/{project_id}")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Explicacion de resultados" in html
+    assert "Salida final generada con la plantilla elegida" in html
+    assert "Resumen por bloques creado desde la transcripcion activa" in html
+    assert "El glosario fija nombres y terminos" in html
+    assert "no son una segunda generacion IA" in html
+    assert "Acciones de regeneracion" in html
+    assert 'data-confirm-title="Regenerar resumen"' in html
+    assert "Recalcula solo el resumen desde la transcripcion activa" in html
+    assert 'data-confirm-title="Regenerar dossier"' in html
+    assert "usando la transcripcion activa y el resumen actual" in html
+    assert 'data-confirm-title="Rehacer exportaciones"' in html
+    assert "No llama a la IA" in html
+    assert 'data-confirm-title="Actualizar todo"' in html
+    assert "opcion recomendada despues de corregir la transcripcion" in html
+    assert 'id="regenerate-dialog"' in html
+    assert "Aceptar y ejecutar" in html
+
+
+def test_project_logs_are_collapsed_when_completed(client, app):
+    with app.app_context():
+        project = Project(
+            title="Jornada terminada",
+            source_filename="evento.mp3",
+            source_file_path="evento.mp3",
+            language="es",
+            status="completed",
+        )
+        project.output = ProjectOutput(
+            full_transcript="Texto",
+            cleaned_transcript="Texto",
+            final_dossier_markdown="# Dossier",
+        )
+        db.session.add(project)
+        db.session.commit()
+        db.session.add(ProjectLog(project_id=project.id, message="Tarea completada."))
+        db.session.commit()
+        project_id = project.id
+
+    response = client.get(f"/projects/{project_id}")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Tarea completada; pulsa para ver el historial." in html
+    assert "open" not in _logs_details_tag(html)
+
+
+def test_project_logs_remain_open_while_processing_or_failed(client, app):
+    for status in ("transcribing", "failed"):
+        with app.app_context():
+            project = Project(
+                title=f"Jornada {status}",
+                source_filename="evento.mp3",
+                source_file_path="evento.mp3",
+                language="es",
+                status=status,
+            )
+            db.session.add(project)
+            db.session.commit()
+            db.session.add(ProjectLog(project_id=project.id, message=f"Log {status}."))
+            db.session.commit()
+            project_id = project.id
+
+        response = client.get(f"/projects/{project_id}")
+        html = response.get_data(as_text=True)
+
+        assert response.status_code == 200
+        assert "Abierto mientras la tarea esta activa o necesita revision." in html
+        assert "open" in _logs_details_tag(html)
 
 
 def test_verify_dossier_grounding_route_stores_quality_review(client, app, monkeypatch):
