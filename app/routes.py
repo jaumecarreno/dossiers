@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
+import shutil
 import uuid
 
 from flask import (
@@ -50,7 +52,13 @@ from app.services.quality_service import (
     parse_glossary_terms,
     serialize_glossary_terms,
 )
-from app.storage import clear_generated_files, project_original_dir, project_root, project_outputs_dir
+from app.storage import (
+    clear_generated_files,
+    project_original_dir,
+    project_root,
+    project_outputs_dir,
+    storage_root,
+)
 from app.tasks import regenerate_project_outputs
 
 bp = Blueprint("main", __name__)
@@ -94,6 +102,10 @@ def _create_project_failure(project: Project, message: str, status_code: int = 5
         )
     flash(message, "error")
     return redirect(detail_url)
+
+
+def _json_error(message: str, status_code: int = 400):
+    return jsonify({"ok": False, "error": message}), status_code
 
 
 @bp.app_errorhandler(RequestEntityTooLarge)
@@ -211,6 +223,251 @@ def _save_transcript_uploads(project_id: int, uploads) -> Path:
         encoding="utf-8",
     )
     return manifest_path
+
+
+def _chunk_upload_root() -> Path:
+    root = storage_root() / "uploads"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _media_upload_chunk_bytes() -> int:
+    chunk_mb = max(1, int(current_app.config.get("MEDIA_UPLOAD_CHUNK_MB", 8)))
+    return chunk_mb * 1024 * 1024
+
+
+def _chunk_upload_dir(upload_id: str) -> Path:
+    if not re.fullmatch(r"[0-9a-f]{32}", upload_id or ""):
+        abort(404)
+    return _chunk_upload_root() / upload_id
+
+
+def _chunk_metadata_path(upload_id: str) -> Path:
+    return _chunk_upload_dir(upload_id) / "metadata.json"
+
+
+def _load_chunk_metadata(upload_id: str) -> dict:
+    path = _chunk_metadata_path(upload_id)
+    if not path.exists():
+        abort(404)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        abort(404)
+    return data if isinstance(data, dict) else {}
+
+
+def _received_chunk_indexes(upload_id: str) -> list[int]:
+    chunks_dir = _chunk_upload_dir(upload_id) / "chunks"
+    indexes = []
+    for path in chunks_dir.glob("*.part"):
+        if path.stem.isdigit():
+            indexes.append(int(path.stem))
+    return sorted(indexes)
+
+
+def _validate_project_metadata(form) -> tuple[dict, Template] | tuple[None, str]:
+    title = (form.get("title") or "").strip()
+    client_name = (form.get("client_name") or "").strip() or None
+    event_name = (form.get("event_name") or "").strip() or None
+    language = form.get("language") or "es"
+    transcription_model = form.get("transcription_model") or DEFAULT_TRANSCRIPTION_MODEL
+    template_id_str = form.get("template_id")
+    glossary_terms = parse_glossary_terms(form.get("glossary"))
+
+    if not title:
+        return None, "El titulo es obligatorio."
+    if not is_valid_language(language):
+        return None, "Idioma no valido."
+    if not is_valid_transcription_model(transcription_model):
+        return None, "Modelo de transcripcion no valido."
+    if not template_id_str or not template_id_str.isdigit():
+        return None, "Plantilla no valida."
+
+    template = Template.query.get(int(template_id_str))
+    if not template:
+        return None, "La plantilla seleccionada no existe."
+
+    return {
+        "title": title,
+        "client_name": client_name,
+        "event_name": event_name,
+        "language": language,
+        "transcription_model": transcription_model,
+        "template": template,
+        "glossary_terms": glossary_terms,
+    }, template
+
+
+def _enqueue_created_project(project: Project):
+    try:
+        enqueue_project_processing(project.id)
+    except Exception as exc:  # pragma: no cover - depends on Redis availability
+        project.status = "failed"
+        project.error_message = f"No se pudo encolar el proyecto: {exc}"
+        add_project_log(project.id, project.error_message, level="error")
+        db.session.commit()
+        return _create_project_failure(project, project.error_message)
+    return _create_project_success(project, "Proyecto creado y encolado.")
+
+
+@bp.post("/uploads/media/start")
+def start_media_upload():
+    data = request.get_json(silent=True) or {}
+    original_filename = str(data.get("filename") or "").strip()
+    filename = secure_filename(original_filename)
+    size = int(data.get("size") or 0)
+    content_type = str(data.get("content_type") or "").strip()
+
+    if not filename:
+        return _json_error("Nombre de archivo no valido.")
+    if not allowed_file(filename):
+        return _json_error("Tipo de archivo no permitido.")
+    if size <= 0:
+        return _json_error("El archivo esta vacio o no informa tamano.")
+
+    max_content_length = current_app.config.get("MAX_CONTENT_LENGTH")
+    if max_content_length and size > max_content_length:
+        max_upload_mb = current_app.config.get("MAX_UPLOAD_MB")
+        return _json_error(
+            f"El archivo supera el limite de subida configurado ({max_upload_mb} MB).",
+            413,
+        )
+
+    upload_id = uuid.uuid4().hex
+    upload_dir = _chunk_upload_dir(upload_id)
+    chunks_dir = upload_dir / "chunks"
+    chunks_dir.mkdir(parents=True, exist_ok=True)
+    chunk_size = _media_upload_chunk_bytes()
+    metadata = {
+        "version": 1,
+        "upload_id": upload_id,
+        "original_filename": original_filename,
+        "filename": filename,
+        "size": size,
+        "content_type": content_type,
+        "chunk_size": chunk_size,
+    }
+    _chunk_metadata_path(upload_id).write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "upload_id": upload_id,
+            "chunk_size": chunk_size,
+            "received_chunks": [],
+        }
+    )
+
+
+@bp.post("/uploads/media/<upload_id>/chunk")
+def upload_media_chunk(upload_id: str):
+    metadata = _load_chunk_metadata(upload_id)
+    chunk_file = request.files.get("chunk")
+    if not chunk_file:
+        return _json_error("No se recibio el fragmento de archivo.")
+
+    try:
+        chunk_index = int(request.form.get("chunk_index", "-1"))
+        total_chunks = int(request.form.get("total_chunks", "0"))
+    except ValueError:
+        return _json_error("Indice de fragmento no valido.")
+
+    if chunk_index < 0 or total_chunks <= 0 or chunk_index >= total_chunks:
+        return _json_error("Indice de fragmento fuera de rango.")
+
+    upload_dir = _chunk_upload_dir(upload_id)
+    chunks_dir = upload_dir / "chunks"
+    chunks_dir.mkdir(parents=True, exist_ok=True)
+    chunk_path = chunks_dir / f"{chunk_index:06d}.part"
+    tmp_path = chunks_dir / f"{chunk_index:06d}.tmp"
+    chunk_file.save(tmp_path)
+    tmp_path.replace(chunk_path)
+
+    metadata["total_chunks"] = total_chunks
+    _chunk_metadata_path(upload_id).write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    received = _received_chunk_indexes(upload_id)
+    return jsonify(
+        {
+            "ok": True,
+            "upload_id": upload_id,
+            "chunk_index": chunk_index,
+            "received_count": len(received),
+            "total_chunks": total_chunks,
+        }
+    )
+
+
+@bp.post("/uploads/media/<upload_id>/finish")
+def finish_media_upload(upload_id: str):
+    metadata = _load_chunk_metadata(upload_id)
+    project_data, template_or_error = _validate_project_metadata(request.form)
+    if not project_data:
+        return _json_error(str(template_or_error))
+
+    total_chunks = int(metadata.get("total_chunks") or request.form.get("total_chunks") or 0)
+    if total_chunks <= 0:
+        return _json_error("La subida no tiene fragmentos registrados.")
+
+    received = _received_chunk_indexes(upload_id)
+    missing = [index for index in range(total_chunks) if index not in received]
+    if missing:
+        return _json_error(
+            f"Faltan {len(missing)} fragmento(s) de la subida. Primero pendiente: {missing[0] + 1}/{total_chunks}."
+        )
+
+    project = Project(
+        title=project_data["title"],
+        client_name=project_data["client_name"],
+        event_name=project_data["event_name"],
+        source_filename=metadata["filename"],
+        source_file_path="",
+        source_kind=SOURCE_KIND_MEDIA,
+        language=project_data["language"],
+        glossary_json=serialize_glossary_terms(project_data["glossary_terms"]),
+        transcription_model=project_data["transcription_model"],
+        template_id=project_data["template"].id,
+        status="uploaded",
+        share_token=uuid.uuid4().hex,
+    )
+    db.session.add(project)
+    db.session.flush()
+
+    try:
+        original_dir = project_original_dir(project.id)
+        source_path = original_dir / metadata["filename"]
+        tmp_source_path = source_path.with_suffix(source_path.suffix + ".uploading")
+        with tmp_source_path.open("wb") as output_file:
+            for index in range(total_chunks):
+                chunk_path = _chunk_upload_dir(upload_id) / "chunks" / f"{index:06d}.part"
+                with chunk_path.open("rb") as input_file:
+                    shutil.copyfileobj(input_file, output_file)
+        tmp_source_path.replace(source_path)
+        expected_size = int(metadata.get("size") or 0)
+        actual_size = source_path.stat().st_size
+        if expected_size and actual_size != expected_size:
+            raise ValueError(
+                f"Tamano final inesperado: {actual_size} bytes recibidos de {expected_size}."
+            )
+    except Exception as exc:
+        db.session.rollback()
+        shutil.rmtree(project_root(project.id), ignore_errors=True)
+        return _json_error(f"No se pudo reconstruir el archivo subido: {exc}", 500)
+
+    project.source_file_path = str(source_path)
+    project.status = "queued"
+    add_project_log(
+        project.id,
+        f"Archivo recibido por subida fragmentada ({total_chunks} fragmentos) y proyecto encolado.",
+    )
+    db.session.commit()
+    shutil.rmtree(_chunk_upload_dir(upload_id), ignore_errors=True)
+    return _enqueue_created_project(project)
 
 
 @bp.post("/projects")

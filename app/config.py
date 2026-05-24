@@ -37,6 +37,7 @@ class Config:
     STORAGE_ROOT = os.getenv("STORAGE_ROOT", str(Path.cwd() / "storage"))
     MAX_UPLOAD_MB = _int_env("MAX_UPLOAD_MB", 10000)
     MAX_CONTENT_LENGTH = MAX_UPLOAD_MB * 1024 * 1024
+    MEDIA_UPLOAD_CHUNK_MB = _int_env("MEDIA_UPLOAD_CHUNK_MB", 8)
 
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     OPENAI_TRANSCRIPTION_MODEL = os.getenv(

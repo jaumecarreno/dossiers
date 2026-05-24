@@ -44,6 +44,7 @@ descargable.
 - `REDIS_URL`: conexión Redis para RQ.
 - `STORAGE_ROOT`: carpeta base de archivos, por defecto `/storage`.
 - `MAX_UPLOAD_MB`: limite de subida, por defecto `10000`.
+- `MEDIA_UPLOAD_CHUNK_MB`: tamano de cada fragmento de subida en navegador, por defecto `8`.
 - `GUNICORN_TIMEOUT`: segundos antes de cortar una peticion larga, por defecto `7200`.
 - `GUNICORN_GRACEFUL_TIMEOUT`: segundos de margen para parada elegante, por defecto `120`.
 - `PORT`: puerto web, por defecto `3000`.

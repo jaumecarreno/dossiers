@@ -261,6 +261,9 @@ def test_new_project_defaults_language_to_spanish(client):
     assert 'id="upload-progress-bar"' in html
     assert 'id="upload-error"' in html
     assert "XMLHttpRequest" in html
+    assert "uploadMediaInChunks" in html
+    assert "/uploads/media/start" in html
+    assert "Subiendo parte" in html
     assert "Fallo tras" in html
     assert "0.003" in html
 
@@ -290,6 +293,103 @@ def test_project_creation_ajax_reports_upload_too_large(client, app):
     assert response.status_code == 413
     assert response.json["ok"] is False
     assert "limite de subida" in response.json["error"]
+
+
+def test_chunked_media_upload_creates_project(client, app, monkeypatch):
+    enqueued: list[int] = []
+    monkeypatch.setattr("app.routes.enqueue_project_processing", lambda project_id: enqueued.append(project_id))
+
+    with app.app_context():
+        template = Template(name="Chunked Template", prompt_instructions="- Seccion")
+        db.session.add(template)
+        db.session.commit()
+        template_id = template.id
+
+    content = b"video-bytes-part-one-and-two"
+    start = client.post(
+        "/uploads/media/start",
+        json={"filename": "evento.mp4", "size": len(content), "content_type": "video/mp4"},
+    )
+
+    assert start.status_code == 200
+    upload_id = start.json["upload_id"]
+
+    parts = [content[:10], content[10:]]
+    for index, part in enumerate(parts):
+        response = client.post(
+            f"/uploads/media/{upload_id}/chunk",
+            data={
+                "chunk_index": str(index),
+                "total_chunks": str(len(parts)),
+                "chunk": (io.BytesIO(part), f"chunk-{index}.part"),
+            },
+            content_type="multipart/form-data",
+        )
+        assert response.status_code == 200
+        assert response.json["received_count"] == index + 1
+
+    finish = client.post(
+        f"/uploads/media/{upload_id}/finish",
+        data={
+            "title": "Proyecto por partes",
+            "language": "es",
+            "transcription_model": DEFAULT_TRANSCRIPTION_MODEL,
+            "template_id": str(template_id),
+            "glossary": "Producto Uno",
+            "total_chunks": str(len(parts)),
+        },
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+
+    assert finish.status_code == 201
+    assert finish.json["ok"] is True
+    with app.app_context():
+        project = Project.query.one()
+        assert project.status == "queued"
+        assert project.source_filename == "evento.mp4"
+        assert Path(project.source_file_path).read_bytes() == content
+        assert json.loads(project.glossary_json)["terms"] == ["Producto Uno"]
+        assert enqueued == [project.id]
+        assert "fragmentada" in project.logs[0].message
+
+
+def test_chunked_media_finish_reports_missing_chunks(client, app):
+    with app.app_context():
+        template = Template(name="Chunked Template", prompt_instructions="- Seccion")
+        db.session.add(template)
+        db.session.commit()
+        template_id = template.id
+
+    start = client.post(
+        "/uploads/media/start",
+        json={"filename": "evento.mp4", "size": 12, "content_type": "video/mp4"},
+    )
+    upload_id = start.json["upload_id"]
+    response = client.post(
+        f"/uploads/media/{upload_id}/chunk",
+        data={
+            "chunk_index": "0",
+            "total_chunks": "2",
+            "chunk": (io.BytesIO(b"first"), "chunk-0.part"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 200
+
+    finish = client.post(
+        f"/uploads/media/{upload_id}/finish",
+        data={
+            "title": "Proyecto incompleto",
+            "language": "es",
+            "transcription_model": DEFAULT_TRANSCRIPTION_MODEL,
+            "template_id": str(template_id),
+            "total_chunks": "2",
+        },
+    )
+
+    assert finish.status_code == 400
+    assert finish.json["ok"] is False
+    assert "Faltan 1 fragmento" in finish.json["error"]
 
 
 def test_project_creation_rejects_invalid_transcription_model(client, app, monkeypatch):

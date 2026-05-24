@@ -172,10 +172,13 @@
       const transcriptFileList = document.getElementById("transcript-file-list");
       const transcriptionCosts = {{ transcription_model_costs_usd_per_minute|tojson }};
       const transcriptionChoices = {{ transcription_model_choices|tojson }};
+      const mediaUploadStartUrl = "{{ url_for('main.start_media_upload') }}";
+      const mediaUploadBaseUrl = mediaUploadStartUrl.replace(/\/start$/, "");
       let mediaDurationSeconds = null;
       let durationRequestId = 0;
       let transcriptFiles = [];
       let uploadStartedAt = null;
+      let uploadedChunkBytes = 0;
 
       function formatSize(bytes) {
         if (bytes < 1024) return bytes + " B";
@@ -217,7 +220,7 @@
           message = text ? text.slice(0, 500) : xhr.statusText;
         }
         if (xhr.status === 502) {
-          return "Bad Gateway durante la subida." + elapsedUploadText() + " Es probable que el proxy o Gunicorn haya cortado la conexion por timeout o limite de tamano. Detalle: " + (message || "HTTP 502");
+          return "Bad Gateway durante la subida." + elapsedUploadText() + " El servidor intermedio devolvio 502; puede ser proxy, proceso web reiniciado, limite de cuerpo, falta de disco, timeout o una caida temporal. Detalle: " + (message || "HTTP 502");
         }
         if (xhr.status === 413) {
           return "El archivo supera el limite de subida configurado." + elapsedUploadText() + " Detalle: " + (message || "HTTP 413");
@@ -237,6 +240,145 @@
       function elapsedUploadText() {
         if (!uploadStartedAt) return "";
         return ` Fallo tras ${formatDuration((Date.now() - uploadStartedAt) / 1000)}.`;
+      }
+
+      function parseJsonResponse(text) {
+        try {
+          return JSON.parse(text || "{}");
+        } catch (_error) {
+          return null;
+        }
+      }
+
+      function xhrRequest(method, url, body, options = {}) {
+        return new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open(method, url);
+          xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
+          Object.entries(options.headers || {}).forEach(([key, value]) => {
+            xhr.setRequestHeader(key, value);
+          });
+          if (options.onProgress) {
+            xhr.upload.addEventListener("progress", options.onProgress);
+          }
+          xhr.addEventListener("load", () => {
+            const data = parseJsonResponse(xhr.responseText);
+            if (xhr.status >= 200 && xhr.status < 300 && (!data || data.ok !== false)) {
+              resolve({ xhr, data });
+              return;
+            }
+            reject(new Error(responseError(xhr)));
+          });
+          xhr.addEventListener("error", () => {
+            reject(new Error("No se pudo completar la subida." + elapsedUploadText() + " Revisa la conexion o los logs del servidor."));
+          });
+          xhr.addEventListener("abort", () => {
+            reject(new Error("La subida se cancelo antes de completarse." + elapsedUploadText()));
+          });
+          xhr.send(body);
+        });
+      }
+
+      function metadataFormData(totalChunks) {
+        const data = new FormData();
+        ["title", "client_name", "event_name", "language", "transcription_model", "template_id", "glossary"].forEach(name => {
+          data.append(name, form.elements[name] ? form.elements[name].value : "");
+        });
+        data.append("source_mode", "media");
+        if (totalChunks) data.append("total_chunks", String(totalChunks));
+        return data;
+      }
+
+      function redirectAfterUpload(result) {
+        if (result.data && result.data.ok && result.data.redirect_url) {
+          window.location.href = result.data.redirect_url;
+          return;
+        }
+        if (result.xhr.responseURL) {
+          window.location.href = result.xhr.responseURL;
+        }
+      }
+
+      async function uploadRegularForm() {
+        const result = await xhrRequest("POST", form.action, new FormData(form), {
+          onProgress: (event) => {
+            if (!event.lengthComputable) {
+              setUploadProgress(0, "Subiendo archivo...");
+              return;
+            }
+            const percent = Math.round((event.loaded / event.total) * 100);
+            setUploadProgress(percent, `Subidos ${formatSize(event.loaded)} de ${formatSize(event.total)}`);
+          },
+        });
+        setUploadProgress(100, "Subida completada. Abriendo el proyecto...");
+        redirectAfterUpload(result);
+      }
+
+      async function uploadChunkWithRetry(uploadId, file, chunkIndex, totalChunks, chunkSize) {
+        const start = chunkIndex * chunkSize;
+        const end = Math.min(file.size, start + chunkSize);
+        const blob = file.slice(start, end);
+        const maxAttempts = 3;
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+          const data = new FormData();
+          data.append("chunk_index", String(chunkIndex));
+          data.append("total_chunks", String(totalChunks));
+          data.append("chunk", blob, `${file.name}.part-${chunkIndex + 1}`);
+          try {
+            await xhrRequest("POST", `${mediaUploadBaseUrl}/${uploadId}/chunk`, data, {
+              onProgress: (event) => {
+                const chunkLoaded = event.lengthComputable ? event.loaded : 0;
+                const totalLoaded = Math.min(file.size, uploadedChunkBytes + chunkLoaded);
+                const percent = Math.max(1, Math.min(99, Math.round((totalLoaded / file.size) * 100)));
+                setUploadProgress(percent, `Subiendo parte ${chunkIndex + 1}/${totalChunks} (${formatSize(totalLoaded)} de ${formatSize(file.size)})`);
+              },
+            });
+            uploadedChunkBytes += blob.size;
+            setUploadProgress(
+              Math.max(1, Math.min(99, Math.round((uploadedChunkBytes / file.size) * 100))),
+              `Parte ${chunkIndex + 1}/${totalChunks} subida`
+            );
+            return;
+          } catch (error) {
+            if (attempt === maxAttempts) {
+              throw new Error(`La parte ${chunkIndex + 1}/${totalChunks} fallo tras ${maxAttempts} intentos. ${error.message}`);
+            }
+            setUploadProgress(
+              Math.max(1, Math.min(99, Math.round((uploadedChunkBytes / file.size) * 100))),
+              `Reintentando parte ${chunkIndex + 1}/${totalChunks} (${attempt + 1}/${maxAttempts})`
+            );
+            await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+          }
+        }
+      }
+
+      async function uploadMediaInChunks(file) {
+        uploadedChunkBytes = 0;
+        setUploadProgress(0, "Iniciando subida por partes...");
+        const startResult = await xhrRequest(
+          "POST",
+          mediaUploadStartUrl,
+          JSON.stringify({
+            filename: file.name,
+            size: file.size,
+            content_type: file.type || "",
+          }),
+          { headers: { "Content-Type": "application/json" } }
+        );
+        const uploadId = startResult.data.upload_id;
+        const chunkSize = startResult.data.chunk_size || (8 * 1024 * 1024);
+        const totalChunks = Math.ceil(file.size / chunkSize);
+        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+          await uploadChunkWithRetry(uploadId, file, chunkIndex, totalChunks, chunkSize);
+        }
+        setUploadProgress(99, "Reconstruyendo archivo y creando proyecto...");
+        const finishResult = await xhrRequest(
+          "POST",
+          `${mediaUploadBaseUrl}/${uploadId}/finish`,
+          metadataFormData(totalChunks)
+        );
+        setUploadProgress(100, "Subida completada. Abriendo el proyecto...");
+        redirectAfterUpload(finishResult);
       }
 
       function formatUsd(amount) {
@@ -405,7 +547,7 @@
 
       updateSourceMode();
 
-      form.addEventListener("submit", (e) => {
+      form.addEventListener("submit", async (e) => {
         e.preventDefault();
         clearUploadError();
         const transcriptMode = currentSourceMode() === "transcript_files";
@@ -423,54 +565,15 @@
         overlay.classList.add("visible");
         uploadStartedAt = Date.now();
         setUploadProgress(0, "Preparando subida...");
-
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", form.action);
-        xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
-
-        xhr.upload.addEventListener("progress", (event) => {
-          if (!event.lengthComputable) {
-            setUploadProgress(0, "Subiendo archivo...");
-            return;
+        try {
+          if (transcriptMode) {
+            await uploadRegularForm();
+          } else {
+            await uploadMediaInChunks(fileInput.files[0]);
           }
-          const percent = Math.round((event.loaded / event.total) * 100);
-          const loaded = formatSize(event.loaded);
-          const total = formatSize(event.total);
-          setUploadProgress(percent, `Subidos ${loaded} de ${total}`);
-        });
-
-        xhr.addEventListener("load", () => {
-          let data = null;
-          try {
-            data = JSON.parse(xhr.responseText || "{}");
-          } catch (_error) {
-            data = null;
-          }
-
-          if (xhr.status >= 200 && xhr.status < 300 && data && data.ok) {
-            setUploadProgress(100, "Subida completada. Abriendo el proyecto...");
-            window.location.href = data.redirect_url;
-            return;
-          }
-
-          if (xhr.status >= 200 && xhr.status < 300 && xhr.responseURL) {
-            setUploadProgress(100, "Subida completada. Abriendo el proyecto...");
-            window.location.href = xhr.responseURL;
-            return;
-          }
-
-          showUploadError(responseError(xhr));
-        });
-
-        xhr.addEventListener("error", () => {
-          showUploadError("No se pudo completar la subida." + elapsedUploadText() + " Revisa la conexion o los logs del servidor.");
-        });
-
-        xhr.addEventListener("abort", () => {
-          showUploadError("La subida se cancelo antes de completarse." + elapsedUploadText());
-        });
-
-        xhr.send(new FormData(form));
+        } catch (error) {
+          showUploadError(error.message || String(error));
+        }
       });
     })();
   </script>
