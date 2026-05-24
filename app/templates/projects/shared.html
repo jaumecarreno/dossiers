@@ -17,9 +17,9 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
-      body { background-color: var(--bg); color: var(--text); padding: 2rem 1rem; }
-      .shared-toolbar { max-width: 800px; margin: 0 auto 1rem; display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
-      .shared-container { max-width: 800px; margin: 0 auto; background: var(--panel); border-radius: 12px; border: 1px solid var(--line); box-shadow: var(--card-shadow); overflow: hidden; }
+      body { display: block; background-color: var(--bg); color: var(--text); padding: 2rem 1rem; }
+      .shared-toolbar { width: min(800px, 100%); margin: 0 auto 1rem; display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+      .shared-container { width: min(800px, 100%); margin: 0 auto; background: var(--panel); border-radius: 12px; border: 1px solid var(--line); box-shadow: var(--card-shadow); overflow: hidden; }
       .shared-header { padding: 3rem 2rem; border-bottom: 1px solid var(--line); background: linear-gradient(to right, rgba(124, 92, 252, 0.08), rgba(79, 140, 255, 0.08)); text-align: center; }
       .shared-header h1 { font-size: 2.5rem; margin-bottom: 0.5rem; color: var(--text); }
       .shared-header p { font-size: 1.1rem; color: var(--muted); }
