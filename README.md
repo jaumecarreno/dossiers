@@ -49,6 +49,7 @@ descargable.
 - `OPENAI_TRANSCRIPTION_MODEL`: por defecto `gpt-4o-transcribe`.
 - `OPENAI_SUMMARY_MODEL`: por defecto `gpt-5.4-mini`.
 - `TRANSCRIPT_CHUNK_MINUTES`: objetivo de fragmentos, por defecto `20`; los cortes se ajustan a silencios cercanos cuando es posible.
+- `YTDLP_COOKIES_FILE`: ruta opcional a un archivo `cookies.txt` para YouTube, por ejemplo `/storage/youtube-cookies.txt`.
 
 ## Migraciones
 
@@ -132,6 +133,26 @@ python -m pytest
 Para esta versión usa **Build Type: Dockerfile**. La app escucha en `PORT=3000`
 con Gunicorn. No uses Nixpacks para este MVP porque el worker, ffmpeg y las
 dependencias Python forman parte del runtime.
+
+### YouTube pide confirmar que no eres un bot
+
+Si YouTube devuelve `Sign in to confirm you're not a bot`, `yt-dlp` necesita
+cookies de una sesión válida de YouTube:
+
+1. Exporta las cookies de `youtube.com` desde tu navegador en formato
+   Netscape/cookies.txt.
+2. Sube ese archivo al almacenamiento persistente del servidor, por ejemplo:
+   `/storage/youtube-cookies.txt`.
+3. En Dokploy añade la variable de entorno:
+
+   ```text
+   YTDLP_COOKIES_FILE=/storage/youtube-cookies.txt
+   ```
+
+4. Haz rebuild/redeploy de la app.
+
+No pegues el contenido de ese archivo en chats, logs ni variables de entorno:
+equivale a una sesión iniciada de YouTube.
 
 ## Roadmap fase 2
 

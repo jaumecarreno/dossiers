@@ -4,6 +4,8 @@ import io
 import json
 from pathlib import Path
 
+import pytest
+
 from app.constants import (
     DEFAULT_TRANSCRIPTION_MODEL,
     LANGUAGE_CHOICES,
@@ -22,6 +24,8 @@ from app.services.export_service import get_transcript_content, markdown_to_docx
 from app.services.media_service import (
     AudioChunk,
     CHUNK_OVERLAP_SECONDS,
+    MediaProcessingError,
+    download_youtube_media,
     normalize_audio,
     parse_silencedetect_output,
     plan_audio_chunks,
@@ -649,6 +653,40 @@ def test_dedupe_overlap_removes_repeated_overlap_text():
 
 def test_chunk_overlap_increased_to_15():
     assert CHUNK_OVERLAP_SECONDS == 15
+
+
+def test_download_youtube_media_passes_cookie_file(monkeypatch, tmp_path):
+    cookies_path = tmp_path / "cookies.txt"
+    cookies_path.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+    commands: list[list[str]] = []
+
+    def fake_run(command):
+        commands.append(command)
+        (tmp_path / "youtube_source.mp3").write_bytes(b"fake youtube audio")
+
+    monkeypatch.setenv("YTDLP_COOKIES_FILE", str(cookies_path))
+    monkeypatch.setattr("app.services.media_service._run", fake_run)
+
+    result = download_youtube_media(
+        "https://www.youtube.com/watch?v=abc123",
+        tmp_path,
+    )
+
+    assert result == tmp_path / "youtube_source.mp3"
+    command = commands[0]
+    assert "--cookies" in command
+    assert command[command.index("--cookies") + 1] == str(cookies_path)
+
+
+def test_download_youtube_media_reports_missing_cookie_file(monkeypatch, tmp_path):
+    missing_path = tmp_path / "missing-cookies.txt"
+    monkeypatch.setenv("YTDLP_COOKIES_FILE", str(missing_path))
+
+    with pytest.raises(MediaProcessingError, match="YTDLP_COOKIES_FILE"):
+        download_youtube_media(
+            "https://www.youtube.com/watch?v=abc123",
+            tmp_path,
+        )
 
 
 def test_dedupe_overlap_handles_longer_overlap():

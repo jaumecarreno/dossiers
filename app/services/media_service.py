@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -35,6 +36,7 @@ SPEECH_FILTERS = ",".join(
         "loudnorm=I=-16:TP=-1.5:LRA=11",
     ]
 )
+YTDLP_COOKIES_FILE_ENV = "YTDLP_COOKIES_FILE"
 
 
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -285,6 +287,19 @@ def is_youtube_url(url: str) -> bool:
     return any(domain in host for domain in ("youtube.com", "youtu.be"))
 
 
+def _youtube_cookie_args() -> list[str]:
+    cookies_file = os.getenv(YTDLP_COOKIES_FILE_ENV)
+    if not cookies_file:
+        return []
+
+    cookies_path = Path(cookies_file).expanduser()
+    if not cookies_path.is_file():
+        raise MediaProcessingError(
+            f"{YTDLP_COOKIES_FILE_ENV} apunta a un archivo que no existe: {cookies_file}"
+        )
+    return ["--cookies", str(cookies_path)]
+
+
 def download_youtube_media(url: str, output_dir: str | Path) -> Path:
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -300,6 +315,7 @@ def download_youtube_media(url: str, output_dir: str | Path) -> Path:
         "mp3",
         "-o",
         str(template),
+        *_youtube_cookie_args(),
         url.strip(),
     ]
     _run(command)
