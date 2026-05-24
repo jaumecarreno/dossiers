@@ -32,11 +32,15 @@
       .shared-transcript { padding: 0 2rem 2rem; }
       .shared-transcript details { border: 1px solid var(--line); border-radius: 8px; background: var(--panel-soft); padding: 1rem; }
       .shared-transcript summary { cursor: pointer; font-weight: 700; }
+      .shared-result-tabs { padding: 1rem 2rem 0; margin-bottom: 0; }
+      .shared-social { padding: 0 2rem 2rem; }
       .shared-footer { padding: 1.5rem 2rem; border-top: 1px solid var(--line); text-align: center; font-size: 0.9rem; color: var(--muted); background: var(--bg); }
       @media (max-width: 600px) {
         body { padding: 1rem; }
         .shared-header { padding: 2rem 1.5rem; }
         .shared-content { padding: 2rem 1.5rem; }
+        .shared-result-tabs { padding: 1rem 1.5rem 0; }
+        .shared-social { padding: 0 1.5rem 1.5rem; }
         .shared-header h1 { font-size: 1.8rem; }
       }
     </style>
@@ -71,14 +75,50 @@
           {% if project.template %}<span>{{ project.template.name }}</span>{% endif %}
         </div>
       </header>
-      
-      <div class="shared-content" id="dossier-content">
-        {% if project.output and project.output.final_dossier_markdown %}
-          {{ project.output.final_dossier_markdown }}
-        {% else %}
-          <p style="text-align:center; color: var(--muted);">El dossier aún se está procesando o no está disponible.</p>
-        {% endif %}
+
+      {% if linkedin_posts %}
+        <div class="result-tabs shared-result-tabs" id="shared-tabs">
+          <button class="result-tab active" data-tab="dossier" type="button">Dossier</button>
+          <button class="result-tab" data-tab="social" type="button">Redes Sociales</button>
+        </div>
+      {% endif %}
+
+      <div class="result-content active" id="shared-tab-dossier">
+        <div class="shared-content" id="dossier-content">
+          {% if project.output and project.output.final_dossier_markdown %}
+            {{ project.output.final_dossier_markdown }}
+          {% else %}
+            <p style="text-align:center; color: var(--muted);">El dossier aún se está procesando o no está disponible.</p>
+          {% endif %}
+        </div>
       </div>
+
+      {% if linkedin_posts %}
+        <div class="result-content" id="shared-tab-social">
+          <div class="shared-social">
+            <div class="linkedin-post-grid">
+              {% for post in linkedin_posts %}
+                <article class="linkedin-post-card">
+                  <div class="linkedin-post-header">
+                    <div class="linkedin-avatar">D</div>
+                    <div>
+                      <strong>{{ project.client_name or project.title }}</strong>
+                      <span>Borrador de LinkedIn &middot; {{ project.event_name or "Dossier" }}</span>
+                    </div>
+                  </div>
+                  <p class="linkedin-post-text">{{ post.text }}</p>
+                  <div class="linkedin-post-stats">Me gusta &middot; Comentar &middot; Compartir</div>
+                  <div class="linkedin-post-actions" aria-hidden="true">
+                    <span>Me gusta</span>
+                    <span>Comentar</span>
+                    <span>Compartir</span>
+                  </div>
+                </article>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      {% endif %}
 
       {% if project.output and (project.output.reviewed_transcript or project.output.cleaned_transcript or project.output.full_transcript) %}
         <div class="shared-transcript">
@@ -103,6 +143,19 @@
 
         if (rawText.trim() && !rawText.includes("El dossier aún se está procesando")) {
           content.innerHTML = marked.parse(rawText.trim());
+        }
+
+        const sharedTabs = document.getElementById("shared-tabs");
+        if (sharedTabs) {
+          sharedTabs.addEventListener("click", (e) => {
+            const btn = e.target.closest(".result-tab");
+            if (!btn) return;
+            sharedTabs.querySelectorAll(".result-tab").forEach(t => t.classList.remove("active"));
+            document.querySelectorAll("[id^='shared-tab-']").forEach(c => c.classList.remove("active"));
+            btn.classList.add("active");
+            const tab = document.getElementById("shared-tab-" + btn.dataset.tab);
+            if (tab) tab.classList.add("active");
+          });
         }
 
         const syncToggle = () => {

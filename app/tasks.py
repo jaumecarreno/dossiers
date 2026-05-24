@@ -34,6 +34,7 @@ from app.services.quality_service import (
     build_quality_report,
     glossary_terms_from_project,
     json_dumps,
+    json_loads_object,
 )
 from app.services.transcript_import_service import load_transcript_texts_from_manifest
 from app.storage import project_audio_dir, project_chunks_dir, project_outputs_dir
@@ -112,7 +113,17 @@ def _build_summary_for_transcript(transcript: str, language: str) -> str:
     return "\n\n".join(block_summaries)
 
 
-def _write_project_exports(project: Project, output: ProjectOutput) -> None:
+def _write_project_exports(
+    project: Project,
+    output: ProjectOutput,
+    preserve_linkedin_posts: bool = False,
+) -> None:
+    existing_linkedin_posts = None
+    if preserve_linkedin_posts:
+        existing_linkedin_posts = json_loads_object(output.output_variants_json).get(
+            "linkedin_posts"
+        )
+
     outputs_dir = project_outputs_dir(project.id)
     markdown_path = outputs_dir / "dossier.md"
     markdown_path.write_text(output.final_dossier_markdown or "", encoding="utf-8")
@@ -122,9 +133,10 @@ def _write_project_exports(project: Project, output: ProjectOutput) -> None:
     markdown_to_pdf(output.final_dossier_markdown or "", pdf_path)
     output.final_dossier_docx_path = str(docx_path)
     output.final_dossier_pdf_path = str(pdf_path)
-    output.output_variants_json = json_dumps(
-        build_output_variants(output.final_dossier_markdown, output.block_summary)
-    )
+    variants = build_output_variants(output.final_dossier_markdown, output.block_summary)
+    if existing_linkedin_posts:
+        variants["linkedin_posts"] = existing_linkedin_posts
+    output.output_variants_json = json_dumps(variants)
 
 
 def regenerate_project_outputs(project: Project, target: str = "all") -> None:
@@ -153,7 +165,11 @@ def regenerate_project_outputs(project: Project, target: str = "all") -> None:
     if target in {"exports", "dossier", "all"}:
         if not output.final_dossier_markdown:
             raise ValueError("No hay dossier final para exportar.")
-        _write_project_exports(project, output)
+        _write_project_exports(
+            project,
+            output,
+            preserve_linkedin_posts=target == "exports",
+        )
 
     _record_quality_report(project, output, {"regenerated_target": target})
     project.status = "completed"

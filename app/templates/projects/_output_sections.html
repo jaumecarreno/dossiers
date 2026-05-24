@@ -1,4 +1,6 @@
 {% set variants = json_loads_object(project.output.output_variants_json) %}
+{% set linkedin_payload = variants.get("linkedin_posts", {}) %}
+{% set linkedin_posts = linkedin_payload.get("posts", []) if linkedin_payload is mapping else [] %}
 {% set review_text = project.output.reviewed_transcript or get_transcript_content(project, include_timestamps=True) or project.output.cleaned_transcript or project.output.full_transcript or "" %}
 
 <section class="panel">
@@ -45,6 +47,10 @@
       <strong>Variantes</strong>
       <p>Contenidos derivados del dossier y las exportaciones; no son una segunda generacion IA.</p>
     </article>
+    <article>
+      <strong>Redes Sociales</strong>
+      <p>Posts de LinkedIn generados bajo demanda desde el dossier final aprobado.</p>
+    </article>
   </div>
 
   <div class="regeneration-bar">
@@ -83,6 +89,7 @@
     <button class="result-tab" data-tab="summary" type="button">Resumen</button>
     <button class="result-tab" data-tab="transcript" type="button">Transcripcion</button>
     <button class="result-tab" data-tab="variants" type="button">Variantes</button>
+    <button class="result-tab" data-tab="social" type="button">Redes Sociales</button>
   </div>
 
   <div class="result-content active" id="tab-dossier">
@@ -161,6 +168,54 @@
       </div>
     {% else %}
       <p class="muted">Regenera exportaciones para crear variantes reutilizables.</p>
+    {% endif %}
+  </div>
+
+  <div class="result-content" id="tab-social">
+    <div class="download-strip">
+      <div>
+        <h3>Posts de LinkedIn</h3>
+        <p class="muted">Crea 5 borradores listos para revisar y copiar. La accion llama a IA y no publica nada.</p>
+      </div>
+      <form
+        action="{{ url_for('main.create_linkedin_posts', project_id=project.id) }}"
+        method="post"
+        data-regenerate-form
+        data-confirm-title="{{ 'Regenerar 5 posts de LinkedIn' if linkedin_posts else 'Crear 5 posts de LinkedIn' }}"
+        data-confirm-body="Esta accion llama a IA usando el dossier final como fuente. No publica nada en LinkedIn."
+      >
+        <button class="button button-primary button-sm" type="submit">
+          {{ "Regenerar 5 posts" if linkedin_posts else "Crear 5 posts de LinkedIn" }}
+        </button>
+      </form>
+    </div>
+
+    {% if linkedin_posts %}
+      <div class="linkedin-post-grid">
+        {% for post in linkedin_posts %}
+          <article class="linkedin-post-card">
+            <div class="linkedin-post-header">
+              <div class="linkedin-avatar">D</div>
+              <div>
+                <strong>{{ project.client_name or project.title }}</strong>
+                <span>Borrador de LinkedIn &middot; {{ project.event_name or "Dossier" }}</span>
+              </div>
+            </div>
+            <p class="linkedin-post-text">{{ post.text }}</p>
+            <div class="linkedin-post-stats">Me gusta &middot; Comentar &middot; Compartir</div>
+            <div class="linkedin-post-actions" aria-hidden="true">
+              <span>Me gusta</span>
+              <span>Comentar</span>
+              <span>Compartir</span>
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="empty-state compact">
+        <h3>Aun no hay posts de LinkedIn</h3>
+        <p>Genera los 5 borradores cuando el dossier final este listo para convertirse en contenido social.</p>
+      </div>
     {% endif %}
   </div>
 </section>

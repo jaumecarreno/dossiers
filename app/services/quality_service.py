@@ -79,6 +79,42 @@ def normalize_grounding_review(raw_value: str | None) -> dict[str, Any]:
     }
 
 
+def build_linkedin_posts_payload(raw_value: str | None) -> dict[str, Any]:
+    raw_text = (raw_value or "").strip()
+    data: Any = None
+    if raw_text:
+        try:
+            data = json.loads(raw_text)
+        except json.JSONDecodeError:
+            data = json_loads_object(_extract_json_object(raw_text))
+
+    if isinstance(data, dict):
+        raw_posts = data.get("posts")
+    elif isinstance(data, list):
+        raw_posts = data
+    else:
+        raw_posts = []
+
+    posts: list[dict[str, str]] = []
+    if isinstance(raw_posts, list):
+        for item in raw_posts:
+            if isinstance(item, dict):
+                text = str(item.get("text") or "").strip()
+            else:
+                text = str(item or "").strip()
+            if text:
+                posts.append({"text": _trim_text(text, 3000)})
+
+    if len(posts) != 5:
+        raise ValueError("La IA no devolvio exactamente 5 posts de LinkedIn.")
+
+    return {
+        "version": 1,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "posts": posts,
+    }
+
+
 def build_quality_report_with_grounding_review(
     project,
     output,

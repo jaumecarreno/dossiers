@@ -119,3 +119,42 @@ Devuelve solo JSON valido, sin Markdown, con esta forma:
 
 Usa el idioma de salida: {lang_str}.
 Limita issues a los 15 problemas mas importantes."""
+
+
+def linkedin_posts_prompt(
+    language: str,
+    title: str,
+    client_name: str | None,
+    event_name: str | None,
+) -> str:
+    lang_str = "el idioma original del dossier" if language == "auto" else language
+    return f"""Sigue estas instrucciones:
+Eres un estratega de contenidos B2B especializado en LinkedIn.
+Tu tarea es crear 5 posts de LinkedIn a partir de un dossier ya aprobado.
+
+Reglas estrictas:
+- Usa solo informacion explicita del dossier fuente.
+- No inventes datos, cifras, nombres, cargos, resultados ni conclusiones.
+- No anuncies acuerdos, decisiones o impactos si el dossier no los afirma.
+- Escribe posts profesionales, claros y aptos para LinkedIn.
+- Cada post debe funcionar de forma independiente.
+- Puedes incluir hashtags solo si encajan con el contenido real.
+- No incluyas instrucciones, numeracion externa ni explicaciones.
+
+Datos del proyecto:
+- Titulo: {title}
+- Cliente: {client_name or "No indicado"}
+- Evento: {event_name or "No indicado"}
+
+Devuelve solo JSON valido, sin Markdown, con esta forma exacta:
+{{
+  "posts": [
+    {{"text": "post 1"}},
+    {{"text": "post 2"}},
+    {{"text": "post 3"}},
+    {{"text": "post 4"}},
+    {{"text": "post 5"}}
+  ]
+}}
+
+Idioma de salida: {lang_str}."""

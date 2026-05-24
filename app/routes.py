@@ -41,9 +41,13 @@ from app.extensions import db
 from app.models import Project, ProjectLog, ProjectOutput, TranscriptChunk, Template
 from app.queue import enqueue_project_processing
 from app.services.export_service import get_transcript_content, markdown_to_docx, text_to_pdf
-from app.services.openai_service import verify_dossier_against_transcript
+from app.services.openai_service import (
+    generate_linkedin_posts,
+    verify_dossier_against_transcript,
+)
 from app.services.quality_service import (
     active_transcript,
+    build_linkedin_posts_payload,
     build_quality_report,
     build_quality_report_with_grounding_review,
     glossary_text_from_project,
@@ -646,6 +650,38 @@ def regenerate_project(project_id: int):
     return redirect(url_for("main.project_detail", project_id=project_id))
 
 
+@bp.post("/projects/<int:project_id>/linkedin-posts")
+def create_linkedin_posts(project_id: int):
+    project = Project.query.get_or_404(project_id)
+    if not project.output or not (project.output.final_dossier_markdown or "").strip():
+        flash("Hace falta un dossier final para crear posts de LinkedIn.", "error")
+        return redirect(url_for("main.project_detail", project_id=project.id))
+
+    try:
+        raw_posts = generate_linkedin_posts(
+            project,
+            project.output.final_dossier_markdown or "",
+        )
+        payload = build_linkedin_posts_payload(raw_posts)
+        variants = json_loads_object(project.output.output_variants_json)
+        variants["linkedin_posts"] = payload
+        project.output.output_variants_json = json_dumps(variants)
+        add_project_log(project.id, "5 posts de LinkedIn generados con IA.")
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        add_project_log(
+            project.id,
+            f"Generacion de posts de LinkedIn fallida: {exc}",
+            level="error",
+        )
+        db.session.commit()
+        flash(f"No se pudieron crear los posts de LinkedIn: {exc}", "error")
+    else:
+        flash("Posts de LinkedIn generados.", "success")
+    return redirect(url_for("main.project_detail", project_id=project.id))
+
+
 @bp.post("/projects/<int:project_id>/verify-dossier")
 def verify_dossier_grounding(project_id: int):
     project = Project.query.get_or_404(project_id)
@@ -830,7 +866,16 @@ def delete_project(project_id: int):
 @bp.get("/p/<token>")
 def shared_dossier(token: str):
     project = Project.query.filter_by(share_token=token).first_or_404()
-    return render_template("projects/shared.html", project=project)
+    variants = json_loads_object(project.output.output_variants_json if project.output else None)
+    linkedin_payload = variants.get("linkedin_posts", {})
+    linkedin_posts = (
+        linkedin_payload.get("posts", []) if isinstance(linkedin_payload, dict) else []
+    )
+    return render_template(
+        "projects/shared.html",
+        project=project,
+        linkedin_posts=linkedin_posts if isinstance(linkedin_posts, list) else [],
+    )
 
 
 @bp.get("/p/<token>/download/<fmt>")

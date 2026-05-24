@@ -11,6 +11,7 @@ from app.services.prompts import (
     clean_transcript_prompt,
     dossier_grounding_review_prompt,
     final_dossier_prompt,
+    linkedin_posts_prompt,
 )
 
 
@@ -165,3 +166,16 @@ Dossier a verificar:
 
 {dossier_markdown}"""
     return _text_response(dossier_grounding_review_prompt(language), user_prompt)
+
+
+def generate_linkedin_posts(project, dossier_markdown: str) -> str:
+    prompt = linkedin_posts_prompt(
+        project.language,
+        project.title,
+        project.client_name,
+        project.event_name,
+    )
+    user_prompt = f"""Dossier fuente:
+
+{dossier_markdown}"""
+    return _text_response(prompt, user_prompt)

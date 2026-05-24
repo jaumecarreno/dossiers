@@ -690,6 +690,8 @@ def test_project_detail_completed_explains_outputs_and_regeneration_actions(clie
     assert "Resumen por bloques creado desde la transcripcion activa" in html
     assert "El glosario fija nombres y terminos" in html
     assert "no son una segunda generacion IA" in html
+    assert "Redes Sociales" in html
+    assert "Crear 5 posts de LinkedIn" in html
     assert "Acciones de regeneracion" in html
     assert 'data-confirm-title="Regenerar resumen"' in html
     assert "Recalcula solo el resumen desde la transcripcion activa" in html
@@ -701,6 +703,121 @@ def test_project_detail_completed_explains_outputs_and_regeneration_actions(clie
     assert "opcion recomendada despues de corregir la transcripcion" in html
     assert 'id="regenerate-dialog"' in html
     assert "Aceptar y ejecutar" in html
+
+
+def test_generate_linkedin_posts_route_stores_posts(client, app, monkeypatch):
+    monkeypatch.setattr(
+        "app.routes.generate_linkedin_posts",
+        lambda _project, _dossier: json.dumps(
+            {
+                "posts": [
+                    {"text": f"Post LinkedIn {index}"}
+                    for index in range(1, 6)
+                ]
+            }
+        ),
+    )
+
+    with app.app_context():
+        project = Project(
+            title="Jornada social",
+            client_name="Cliente",
+            event_name="Evento",
+            source_filename="evento.mp3",
+            source_file_path="evento.mp3",
+            language="es",
+            status="completed",
+        )
+        project.output = ProjectOutput(
+            full_transcript="Texto",
+            cleaned_transcript="Texto",
+            final_dossier_markdown="# Dossier\n\nContenido aprobado.",
+            output_variants_json=json.dumps({"version": 1}),
+        )
+        db.session.add(project)
+        db.session.commit()
+        project_id = project.id
+
+    response = client.post(f"/projects/{project_id}/linkedin-posts", follow_redirects=False)
+
+    assert response.status_code == 302
+    with app.app_context():
+        project = Project.query.get(project_id)
+        variants = json.loads(project.output.output_variants_json)
+        linkedin_posts = variants["linkedin_posts"]
+        assert linkedin_posts["version"] == 1
+        assert len(linkedin_posts["posts"]) == 5
+        assert linkedin_posts["posts"][0]["text"] == "Post LinkedIn 1"
+        assert any("5 posts de LinkedIn generados" in log.message for log in project.logs)
+
+
+def test_generate_linkedin_posts_requires_final_dossier(client, app, monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "app.routes.generate_linkedin_posts",
+        lambda _project, _dossier: calls.append("called") or "{}",
+    )
+
+    with app.app_context():
+        project = Project(
+            title="Jornada sin dossier",
+            source_filename="evento.mp3",
+            source_file_path="evento.mp3",
+            language="es",
+            status="completed",
+        )
+        project.output = ProjectOutput(full_transcript="Texto", cleaned_transcript="Texto")
+        db.session.add(project)
+        db.session.commit()
+        project_id = project.id
+
+    response = client.post(f"/projects/{project_id}/linkedin-posts", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert calls == []
+    with app.app_context():
+        project = Project.query.get(project_id)
+        assert not project.output.output_variants_json
+
+
+def test_project_social_tab_renders_linkedin_cards(client, app):
+    linkedin_variants = {
+        "version": 1,
+        "linkedin_posts": {
+            "version": 1,
+            "generated_at": "2026-05-25T00:00:00+00:00",
+            "posts": [{"text": f"Contenido LinkedIn {index}"} for index in range(1, 6)],
+        },
+    }
+    with app.app_context():
+        project = Project(
+            title="Jornada con redes",
+            client_name="Cliente social",
+            event_name="Evento social",
+            source_filename="evento.mp3",
+            source_file_path="evento.mp3",
+            language="es",
+            status="completed",
+        )
+        project.output = ProjectOutput(
+            full_transcript="Texto",
+            cleaned_transcript="Texto",
+            final_dossier_markdown="# Dossier",
+            output_variants_json=json.dumps(linkedin_variants),
+        )
+        db.session.add(project)
+        db.session.commit()
+        project_id = project.id
+
+    response = client.get(f"/projects/{project_id}")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert 'data-tab="social"' in html
+    assert "Regenerar 5 posts" in html
+    assert "Contenido LinkedIn 1" in html
+    assert "linkedin-post-card" in html
+    assert "Me gusta" in html
 
 
 def test_project_logs_are_collapsed_when_completed(client, app):
@@ -865,11 +982,49 @@ def test_shared_dossier_supports_dark_theme_toggle(client, app):
     assert "Markdown" in html
     assert "Ver transcripcion" in html
     assert "Transcripcion visible" in html
+    assert "Redes Sociales" not in html
     assert "localStorage.setItem(\"dossiers-theme\", nextTheme)" in html
 
     response = client.get("/p/token-publico/download/markdown")
     assert response.status_code == 200
     assert "# Título público" in response.get_data(as_text=True)
+
+
+def test_shared_dossier_renders_social_tab_when_linkedin_posts_exist(client, app):
+    variants = {
+        "linkedin_posts": {
+            "version": 1,
+            "generated_at": "2026-05-25T00:00:00+00:00",
+            "posts": [{"text": f"Post publico {index}"} for index in range(1, 6)],
+        }
+    }
+    with app.app_context():
+        project = Project(
+            title="Dossier con redes",
+            client_name="Cliente",
+            event_name="Evento",
+            source_filename="evento.mp3",
+            source_file_path="evento.mp3",
+            language="es",
+            status="completed",
+            share_token="token-redes",
+        )
+        project.output = ProjectOutput(
+            final_dossier_markdown="# Titulo publico",
+            full_transcript="Transcripcion visible",
+            output_variants_json=json.dumps(variants),
+        )
+        db.session.add(project)
+        db.session.commit()
+
+    response = client.get("/p/token-redes")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Redes Sociales" in html
+    assert "Post publico 1" in html
+    assert "linkedin-post-card" in html
+    assert "shared-tab-social" in html
 
 
 def test_markdown_to_docx_creates_file(tmp_path):
