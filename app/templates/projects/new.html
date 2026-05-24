@@ -175,6 +175,7 @@
       let mediaDurationSeconds = null;
       let durationRequestId = 0;
       let transcriptFiles = [];
+      let uploadStartedAt = null;
 
       function formatSize(bytes) {
         if (bytes < 1024) return bytes + " B";
@@ -216,12 +217,12 @@
           message = text ? text.slice(0, 500) : xhr.statusText;
         }
         if (xhr.status === 502) {
-          return "Bad Gateway durante la subida. Es probable que el proxy o Gunicorn haya cortado la conexion por timeout o limite de tamano. Detalle: " + (message || "HTTP 502");
+          return "Bad Gateway durante la subida." + elapsedUploadText() + " Es probable que el proxy o Gunicorn haya cortado la conexion por timeout o limite de tamano. Detalle: " + (message || "HTTP 502");
         }
         if (xhr.status === 413) {
-          return "El archivo supera el limite de subida configurado. Detalle: " + (message || "HTTP 413");
+          return "El archivo supera el limite de subida configurado." + elapsedUploadText() + " Detalle: " + (message || "HTTP 413");
         }
-        return `Error de subida (HTTP ${xhr.status || "sin respuesta"}): ${message || "sin detalle del servidor"}`;
+        return `Error de subida (HTTP ${xhr.status || "sin respuesta"}): ${message || "sin detalle del servidor"}.${elapsedUploadText()}`;
       }
 
       function formatDuration(seconds) {
@@ -231,6 +232,11 @@
         if (minutes === 0) return `${remainingSeconds} s`;
         if (remainingSeconds === 0) return `${minutes} min`;
         return `${minutes} min ${remainingSeconds} s`;
+      }
+
+      function elapsedUploadText() {
+        if (!uploadStartedAt) return "";
+        return ` Fallo tras ${formatDuration((Date.now() - uploadStartedAt) / 1000)}.`;
       }
 
       function formatUsd(amount) {
@@ -415,6 +421,7 @@
         }
         submitBtn.disabled = true;
         overlay.classList.add("visible");
+        uploadStartedAt = Date.now();
         setUploadProgress(0, "Preparando subida...");
 
         const xhr = new XMLHttpRequest();
@@ -456,11 +463,11 @@
         });
 
         xhr.addEventListener("error", () => {
-          showUploadError("No se pudo completar la subida. Revisa la conexion o los logs del servidor.");
+          showUploadError("No se pudo completar la subida." + elapsedUploadText() + " Revisa la conexion o los logs del servidor.");
         });
 
         xhr.addEventListener("abort", () => {
-          showUploadError("La subida se cancelo antes de completarse.");
+          showUploadError("La subida se cancelo antes de completarse." + elapsedUploadText());
         });
 
         xhr.send(new FormData(form));

@@ -261,6 +261,7 @@ def test_new_project_defaults_language_to_spanish(client):
     assert 'id="upload-progress-bar"' in html
     assert 'id="upload-error"' in html
     assert "XMLHttpRequest" in html
+    assert "Fallo tras" in html
     assert "0.003" in html
 
 

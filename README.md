@@ -44,7 +44,8 @@ descargable.
 - `REDIS_URL`: conexión Redis para RQ.
 - `STORAGE_ROOT`: carpeta base de archivos, por defecto `/storage`.
 - `MAX_UPLOAD_MB`: limite de subida, por defecto `10000`.
-- `GUNICORN_TIMEOUT`: segundos antes de cortar una peticion larga, por defecto `1800`.
+- `GUNICORN_TIMEOUT`: segundos antes de cortar una peticion larga, por defecto `7200`.
+- `GUNICORN_GRACEFUL_TIMEOUT`: segundos de margen para parada elegante, por defecto `120`.
 - `PORT`: puerto web, por defecto `3000`.
 - `OPENAI_API_KEY`: API key de OpenAI.
 - `OPENAI_TRANSCRIPTION_MODEL`: por defecto `gpt-4o-transcribe`.
@@ -133,6 +134,11 @@ python -m pytest
 Para esta versión usa **Build Type: Dockerfile**. La app escucha en `PORT=3000`
 con Gunicorn. No uses Nixpacks para este MVP porque el worker, ffmpeg y las
 dependencias Python forman parte del runtime.
+
+Para subidas grandes, reconstruye y redespliega la imagen despues de cambiar
+timeouts. Si una subida sigue devolviendo `Bad Gateway`, revisa tambien el
+timeout y limite de cuerpo del proxy externo de Dokploy/Traefik/Nginx; ese
+corte puede ocurrir antes de que Flask reciba la peticion.
 
 ## Roadmap fase 2
 
