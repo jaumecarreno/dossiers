@@ -73,7 +73,7 @@
       <div class="source-mode-group" role="radiogroup" aria-label="Origen del proyecto">
         <label class="source-mode-option">
           <input type="radio" name="source_mode" value="media" checked />
-          <span>Audio, vídeo o YouTube</span>
+          <span>Audio o vídeo</span>
         </label>
         <label class="source-mode-option">
           <input type="radio" name="source_mode" value="transcript_files" />
@@ -102,10 +102,6 @@
           </button>
         </div>
       </div>
-      <label>
-        <span>O enlace de YouTube</span>
-        <input type="url" name="youtube_url" id="youtube-url" placeholder="https://www.youtube.com/watch?v=..." />
-      </label>
     </div>
 
     <div id="transcript-source-fields" class="source-fields" hidden>
@@ -158,7 +154,6 @@
       const fileRemove = document.getElementById("file-remove");
       const overlay = document.getElementById("upload-overlay");
       const submitBtn = document.getElementById("submit-btn");
-      const youtubeInput = document.getElementById("youtube-url");
       const transcriptionModel = form.elements.transcription_model;
       const costValue = document.getElementById("transcription-cost-value");
       const costDetail = document.getElementById("transcription-cost-detail");
@@ -216,13 +211,8 @@
           return;
         }
         if (!mediaDurationSeconds || !rate) {
-          if ((youtubeInput.value || "").trim()) {
-            costValue.textContent = "Se calculará tras descargar";
-            costDetail.textContent = "Para YouTube no se puede leer la duración antes de crear el dossier.";
-          } else {
-            costValue.textContent = "Selecciona un archivo";
-            costDetail.textContent = "Solo transcripción; no incluye limpieza, resumen ni dossier.";
-          }
+          costValue.textContent = "Selecciona un archivo";
+          costDetail.textContent = "Solo transcripción; no incluye limpieza, resumen ni dossier.";
           return;
         }
         const estimatedCost = (mediaDurationSeconds / 60) * rate;
@@ -329,9 +319,6 @@
 
       fileRemove.addEventListener("click", clearPreview);
       transcriptionModel.addEventListener("change", () => updateCostEstimate());
-      youtubeInput.addEventListener("input", () => {
-        if (!fileInput.files.length) updateCostEstimate();
-      });
       sourceModeInputs.forEach(input => input.addEventListener("change", updateSourceMode));
       transcriptInput.addEventListener("change", () => {
         if (transcriptInput.files.length) addTranscriptFiles(transcriptInput.files);
@@ -364,7 +351,6 @@
       form.addEventListener("submit", (e) => {
         const transcriptMode = currentSourceMode() === "transcript_files";
         const hasFile = fileInput.files.length > 0;
-        const hasYoutube = (youtubeInput.value || "").trim().length > 0;
         const hasTranscriptFiles = transcriptInput.files.length > 0;
         if (transcriptMode && !hasTranscriptFiles) {
           e.preventDefault();
@@ -372,9 +358,9 @@
           submitBtn.disabled = false;
           return;
         }
-        if (!transcriptMode && !hasFile && !hasYoutube) {
+        if (!transcriptMode && !hasFile) {
           e.preventDefault();
-          alert("Selecciona un archivo o indica un enlace de YouTube.");
+          alert("Selecciona un archivo de audio o vídeo.");
           submitBtn.disabled = false;
           return;
         }

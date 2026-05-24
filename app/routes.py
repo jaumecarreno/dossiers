@@ -25,7 +25,6 @@ from app.constants import (
     TRANSCRIPTION_MODEL_COSTS_USD_PER_MINUTE,
     SOURCE_KIND_MEDIA,
     SOURCE_KIND_TRANSCRIPT_FILES,
-    SOURCE_KIND_YOUTUBE,
     allowed_file,
     allowed_transcript_file,
     get_transcription_model_label,
@@ -37,7 +36,6 @@ from app.extensions import db
 from app.models import Project, ProjectLog, ProjectOutput, TranscriptChunk, Template
 from app.queue import enqueue_project_processing
 from app.services.export_service import get_transcript_content, markdown_to_docx, text_to_pdf
-from app.services.media_service import download_youtube_media, is_youtube_url
 from app.services.quality_service import (
     build_quality_report,
     glossary_text_from_project,
@@ -178,8 +176,6 @@ def create_project():
         for file in request.files.getlist("transcript_files")
         if file and file.filename
     ]
-    youtube_url = (request.form.get("youtube_url") or "").strip()
-
     if not title:
         flash("El título es obligatorio.", "error")
         return redirect(url_for("main.new_project"))
@@ -217,16 +213,10 @@ def create_project():
             flash("Tipo de transcripcion no permitido.", "error")
             return redirect(url_for("main.new_project"))
         filename = _source_filename_summary([file.filename for file in transcript_uploads])
-    elif not upload or not upload.filename:
-        if not youtube_url:
-            flash("Selecciona un archivo o indica una URL de YouTube.", "error")
-            return redirect(url_for("main.new_project"))
-        if not is_youtube_url(youtube_url):
-            flash("La URL no parece válida de YouTube.", "error")
-            return redirect(url_for("main.new_project"))
-        source_kind = SOURCE_KIND_YOUTUBE
-        filename = "youtube_source.mp3"
     else:
+        if not upload or not upload.filename:
+            flash("Selecciona un archivo de audio o vídeo.", "error")
+            return redirect(url_for("main.new_project"))
         if not allowed_file(upload.filename):
             flash("Tipo de archivo no permitido.", "error")
             return redirect(url_for("main.new_project"))
@@ -257,16 +247,8 @@ def create_project():
             db.session.rollback()
             flash(str(exc), "error")
             return redirect(url_for("main.new_project"))
-    elif upload and upload.filename:
-        upload.save(source_path)
     else:
-        try:
-            source_path = download_youtube_media(youtube_url, original_dir)
-        except Exception as exc:
-            db.session.rollback()
-            flash(f"No se pudo descargar el contenido de YouTube: {exc}", "error")
-            return redirect(url_for("main.new_project"))
-        project.source_filename = source_path.name
+        upload.save(source_path)
 
     project.source_file_path = str(source_path)
     project.status = "queued"

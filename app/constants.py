@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 SOURCE_KIND_MEDIA = "media"
-SOURCE_KIND_YOUTUBE = "youtube"
 SOURCE_KIND_TRANSCRIPT_FILES = "transcript_files"
 SOURCE_KINDS = {
     SOURCE_KIND_MEDIA,
-    SOURCE_KIND_YOUTUBE,
     SOURCE_KIND_TRANSCRIPT_FILES,
 }
 

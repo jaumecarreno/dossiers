@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
 
 
 class MediaProcessingError(RuntimeError):
@@ -36,7 +34,6 @@ SPEECH_FILTERS = ",".join(
         "loudnorm=I=-16:TP=-1.5:LRA=11",
     ]
 )
-YTDLP_COOKIES_FILE_ENV = "YTDLP_COOKIES_FILE"
 
 
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -279,47 +276,3 @@ def split_audio(
     return chunks
 
 
-def is_youtube_url(url: str) -> bool:
-    parsed = urlparse(url.strip())
-    if parsed.scheme not in {"http", "https"}:
-        return False
-    host = parsed.netloc.lower()
-    return any(domain in host for domain in ("youtube.com", "youtu.be"))
-
-
-def _youtube_cookie_args() -> list[str]:
-    cookies_file = os.getenv(YTDLP_COOKIES_FILE_ENV)
-    if not cookies_file:
-        return []
-
-    cookies_path = Path(cookies_file).expanduser()
-    if not cookies_path.is_file():
-        raise MediaProcessingError(
-            f"{YTDLP_COOKIES_FILE_ENV} apunta a un archivo que no existe: {cookies_file}"
-        )
-    return ["--cookies", str(cookies_path)]
-
-
-def download_youtube_media(url: str, output_dir: str | Path) -> Path:
-    output = Path(output_dir)
-    output.mkdir(parents=True, exist_ok=True)
-    template = output / "youtube_source.%(ext)s"
-    command = [
-        "yt-dlp",
-        "--no-playlist",
-        "--no-warnings",
-        "-f",
-        "bestaudio/best",
-        "--extract-audio",
-        "--audio-format",
-        "mp3",
-        "-o",
-        str(template),
-        *_youtube_cookie_args(),
-        url.strip(),
-    ]
-    _run(command)
-    files = sorted(output.glob("youtube_source.*"))
-    if not files:
-        raise MediaProcessingError("No se pudo descargar el contenido de YouTube.")
-    return files[0]
