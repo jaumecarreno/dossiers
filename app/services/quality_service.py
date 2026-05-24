@@ -18,6 +18,14 @@ EXPECTED_DOSSIER_SECTIONS = [
     "Conclusiones",
 ]
 
+GROUNDING_VERDICTS = {"aprobado", "revisar", "critico"}
+GROUNDING_PROBLEMS = {
+    "no_en_fuente",
+    "contradice_fuente",
+    "inferencia_no_marcada",
+    "demasiado_especifico",
+}
+
 
 def json_dumps(data: dict[str, Any]) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True)
@@ -31,6 +39,60 @@ def json_loads_object(value: str | None) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def normalize_grounding_review(raw_value: str | None) -> dict[str, Any]:
+    raw_text = (raw_value or "").strip()
+    data = json_loads_object(raw_text)
+    if not data:
+        data = json_loads_object(_extract_json_object(raw_text))
+
+    if not data:
+        return {
+            "version": 1,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "verdict": "revisar",
+            "summary": "La verificacion se ejecuto, pero la respuesta no se pudo interpretar como JSON.",
+            "supported_count": 0,
+            "unsupported_count": 0,
+            "issues": [],
+            "raw_response": _trim_text(raw_text, 4000),
+        }
+
+    issues = _normalize_grounding_issues(data.get("issues"))
+    verdict = str(data.get("verdict") or "").strip().casefold()
+    if verdict not in GROUNDING_VERDICTS:
+        verdict = "revisar" if issues else "aprobado"
+
+    unsupported_count = max(_safe_int(data.get("unsupported_count"), len(issues)), len(issues))
+    supported_count = _safe_int(data.get("supported_count"), 0)
+    if verdict == "aprobado" and unsupported_count:
+        verdict = "revisar"
+    return {
+        "version": 1,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "verdict": verdict,
+        "summary": _trim_text(str(data.get("summary") or "").strip(), 1200),
+        "supported_count": supported_count,
+        "unsupported_count": unsupported_count,
+        "issues": issues,
+    }
+
+
+def build_quality_report_with_grounding_review(
+    project,
+    output,
+    raw_review: str | None,
+    metrics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    report = build_quality_report(project, output, metrics)
+    review = normalize_grounding_review(raw_review)
+    report["grounding_review"] = review
+    if review["verdict"] != "aprobado":
+        report["warnings"].append(
+            "La verificacion factual encontro afirmaciones que conviene revisar."
+        )
+    return report
 
 
 def parse_glossary_terms(raw_value: str | None) -> list[str]:
@@ -151,6 +213,53 @@ def build_quality_report(project, output, metrics: dict[str, Any] | None = None)
 
 def _word_count(text: str) -> int:
     return len(re.findall(r"\b\w+\b", text or "", flags=re.UNICODE))
+
+
+def _extract_json_object(text: str) -> str:
+    if not text:
+        return ""
+    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL)
+    if fence_match:
+        return fence_match.group(1)
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return ""
+    return text[start : end + 1]
+
+
+def _normalize_grounding_issues(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    issues: list[dict[str, str]] = []
+    for item in value[:15]:
+        if not isinstance(item, dict):
+            continue
+        problem = str(item.get("problem") or "").strip().casefold()
+        if problem not in GROUNDING_PROBLEMS:
+            problem = "no_en_fuente"
+        issues.append(
+            {
+                "claim": _trim_text(str(item.get("claim") or "").strip(), 600),
+                "problem": problem,
+                "evidence": _trim_text(
+                    str(item.get("evidence") or "Sin evidencia localizada").strip(),
+                    800,
+                ),
+                "recommendation": _trim_text(
+                    str(item.get("recommendation") or "").strip(),
+                    800,
+                ),
+            }
+        )
+    return issues
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return default
 
 
 def _contains_heading(markdown_text: str, heading: str) -> bool:

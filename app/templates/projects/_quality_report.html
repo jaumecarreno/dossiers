@@ -16,6 +16,47 @@
       </div>
     {% endif %}
 
+    {% if quality.grounding_review %}
+      {% set review = quality.grounding_review %}
+      <div class="quality-review quality-review-{{ review.verdict }}">
+        <div class="quality-review-header">
+          <div>
+            <p class="eyebrow">Verificacion factual</p>
+            <h3>
+              {% if review.verdict == "aprobado" %}
+                Aprobado
+              {% elif review.verdict == "critico" %}
+                Critico
+              {% else %}
+                Revisar
+              {% endif %}
+            </h3>
+          </div>
+          <div class="quality-review-counts">
+            <span>{{ review.supported_count|default(0) }} apoyadas</span>
+            <span>{{ review.unsupported_count|default(0) }} dudosas</span>
+          </div>
+        </div>
+        {% if review.summary %}
+          <p class="quality-review-summary">{{ review.summary }}</p>
+        {% endif %}
+        {% if review.issues %}
+          <div class="quality-issue-list">
+            {% for issue in review.issues %}
+              <article class="quality-issue">
+                <strong>{{ issue.claim }}</strong>
+                <span>{{ issue.problem }}</span>
+                <p><b>Evidencia:</b> {{ issue.evidence }}</p>
+                {% if issue.recommendation %}
+                  <p><b>Correccion:</b> {{ issue.recommendation }}</p>
+                {% endif %}
+              </article>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+    {% endif %}
+
     <div class="meta-grid quality-grid">
       <div>
         <span>Palabras transcript</span>

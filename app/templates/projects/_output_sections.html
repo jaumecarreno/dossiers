@@ -45,6 +45,14 @@
       <input type="hidden" name="target" value="all" />
       <button class="button button-primary button-sm" type="submit">Actualizar todo</button>
     </form>
+    {% if project.status == "completed" %}
+      <form action="{{ url_for('main.verify_dossier_grounding', project_id=project.id) }}" method="post">
+        <button class="button button-sm" type="submit">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="m9 12 2 2 4-4"/></svg>
+          Verificar con IA
+        </button>
+      </form>
+    {% endif %}
   </div>
 
   <div class="result-tabs" id="result-tabs">

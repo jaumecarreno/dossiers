@@ -36,8 +36,11 @@ from app.extensions import db
 from app.models import Project, ProjectLog, ProjectOutput, TranscriptChunk, Template
 from app.queue import enqueue_project_processing
 from app.services.export_service import get_transcript_content, markdown_to_docx, text_to_pdf
+from app.services.openai_service import verify_dossier_against_transcript
 from app.services.quality_service import (
+    active_transcript,
     build_quality_report,
+    build_quality_report_with_grounding_review,
     glossary_text_from_project,
     json_dumps,
     json_loads_object,
@@ -347,6 +350,49 @@ def regenerate_project(project_id: int):
     else:
         flash("Regeneracion completada.", "success")
     return redirect(url_for("main.project_detail", project_id=project_id))
+
+
+@bp.post("/projects/<int:project_id>/verify-dossier")
+def verify_dossier_grounding(project_id: int):
+    project = Project.query.get_or_404(project_id)
+    if not project.output:
+        abort(404)
+    if project.status == "reviewing_transcript":
+        flash("Regenera el dossier antes de verificarlo contra la transcripcion revisada.", "error")
+        return redirect(url_for("main.project_detail", project_id=project.id))
+
+    transcript = active_transcript(project.output)
+    dossier_markdown = (project.output.final_dossier_markdown or "").strip()
+    if not transcript or not dossier_markdown:
+        flash("Hace falta transcripcion y dossier final para ejecutar la verificacion.", "error")
+        return redirect(url_for("main.project_detail", project_id=project.id))
+
+    try:
+        raw_review = verify_dossier_against_transcript(
+            transcript,
+            dossier_markdown,
+            project.language,
+        )
+        project.output.quality_report_json = json_dumps(
+            build_quality_report_with_grounding_review(project, project.output, raw_review)
+        )
+        report = json_loads_object(project.output.quality_report_json)
+        review = report.get("grounding_review", {})
+        verdict = review.get("verdict", "revisar")
+        add_project_log(
+            project.id,
+            f"Verificacion factual completada: {verdict}.",
+            level="warning" if verdict != "aprobado" else "info",
+        )
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        add_project_log(project.id, f"Verificacion factual fallida: {exc}", level="error")
+        db.session.commit()
+        flash(f"No se pudo verificar el dossier: {exc}", "error")
+    else:
+        flash("Verificacion factual completada.", "success")
+    return redirect(url_for("main.project_detail", project_id=project.id))
 
 
 @bp.post("/projects/<int:project_id>/retry")

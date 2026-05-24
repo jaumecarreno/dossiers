@@ -9,6 +9,7 @@ from openai import OpenAI
 from app.services.prompts import (
     block_summary_prompt,
     clean_transcript_prompt,
+    dossier_grounding_review_prompt,
     final_dossier_prompt,
 )
 
@@ -149,3 +150,18 @@ Resúmenes parciales:
 
 {block_summary}"""
     return _text_response(prompt, user_prompt)
+
+
+def verify_dossier_against_transcript(
+    transcript: str,
+    dossier_markdown: str,
+    language: str,
+) -> str:
+    user_prompt = f"""Transcripcion fuente:
+
+{transcript}
+
+Dossier a verificar:
+
+{dossier_markdown}"""
+    return _text_response(dossier_grounding_review_prompt(language), user_prompt)

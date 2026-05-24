@@ -1357,6 +1357,95 @@ pre {
   color: var(--danger);
 }
 
+.quality-review {
+  display: grid;
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.quality-review-aprobado {
+  border-color: var(--success-line);
+}
+
+.quality-review-revisar,
+.quality-review-critico {
+  border-color: var(--error-line);
+  background: var(--error-bg);
+}
+
+.quality-review-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.quality-review-header h3 {
+  margin-bottom: 0;
+}
+
+.quality-review-counts {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.quality-review-counts span {
+  display: inline-flex;
+  min-height: 1.7rem;
+  align-items: center;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.quality-review-summary {
+  margin: 0;
+}
+
+.quality-issue-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.quality-issue {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.quality-issue strong {
+  display: block;
+}
+
+.quality-issue span {
+  justify-self: start;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: var(--status-bg);
+  color: var(--primary);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.quality-issue p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+}
+
 /* ========================================
    Table (fallback)
    ======================================== */

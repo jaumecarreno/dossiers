@@ -27,6 +27,13 @@ from app.services.media_service import (
     plan_audio_chunks,
 )
 from app.services.openai_service import clean_transcript, transcribe_audio
+from app.services.prompts import (
+    block_summary_prompt,
+    clean_transcript_prompt,
+    dossier_grounding_review_prompt,
+    final_dossier_prompt,
+)
+from app.services.quality_service import normalize_grounding_review
 from app.services.transcript_import_service import extract_transcript_text
 from app.tasks import (
     _build_transcription_prompt,
@@ -176,6 +183,45 @@ def test_allowed_transcript_file_extensions():
     assert allowed_transcript_file("parte.vtt")
     assert not allowed_transcript_file("parte.pdf")
     assert not allowed_transcript_file("archivo")
+
+
+def test_prompts_prioritize_explicit_source_facts():
+    clean_prompt = clean_transcript_prompt("es")
+    summary_prompt = block_summary_prompt("es")
+    dossier_prompt = final_dossier_prompt("- Secciones", "es", "Titulo", None, None)
+    review_prompt = dossier_grounding_review_prompt("es")
+
+    assert "No inventes informacion" in clean_prompt
+    assert "solo hechos explicitos en la fuente" in summary_prompt
+    assert "Debes redactar solo con hechos explicitos en la fuente" in dossier_prompt
+    assert "No consta en la transcripcion" in dossier_prompt
+    assert "Devuelve solo JSON valido" in review_prompt
+
+
+def test_normalize_grounding_review_handles_json_fences():
+    report = normalize_grounding_review(
+        """```json
+        {
+          "verdict": "critico",
+          "summary": "Hay afirmaciones sin evidencia.",
+          "supported_count": 2,
+          "unsupported_count": 1,
+          "issues": [
+            {
+              "claim": "Se aprobo un plan anual.",
+              "problem": "no_en_fuente",
+              "evidence": "Sin evidencia localizada",
+              "recommendation": "Eliminar la afirmacion."
+            }
+          ]
+        }
+        ```"""
+    )
+
+    assert report["verdict"] == "critico"
+    assert report["supported_count"] == 2
+    assert report["unsupported_count"] == 1
+    assert report["issues"][0]["problem"] == "no_en_fuente"
 
 
 def test_transcription_cost_estimate_helpers():
@@ -416,6 +462,87 @@ def test_project_detail_completed_shows_public_link(client, app):
     assert 'id="public-link-action"' in html
     assert "Ver Enlace Público" in html
     assert "/p/token-completado" in html
+
+
+def test_project_detail_completed_shows_ai_verification_button(client, app):
+    with app.app_context():
+        project = Project(
+            title="Jornada verificable",
+            source_filename="evento.mp3",
+            source_file_path="evento.mp3",
+            language="es",
+            status="completed",
+        )
+        project.output = ProjectOutput(
+            full_transcript="La ponente explico el plan.",
+            cleaned_transcript="La ponente explico el plan.",
+            final_dossier_markdown="# Dossier\n\nLa ponente explico el plan.",
+        )
+        db.session.add(project)
+        db.session.commit()
+        project_id = project.id
+
+    response = client.get(f"/projects/{project_id}")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Verificar con IA" in html
+    assert f"/projects/{project_id}/verify-dossier" in html
+
+
+def test_verify_dossier_grounding_route_stores_quality_review(client, app, monkeypatch):
+    monkeypatch.setattr(
+        "app.routes.verify_dossier_against_transcript",
+        lambda _transcript, _dossier, _language: json.dumps(
+            {
+                "verdict": "revisar",
+                "summary": "Una afirmacion no aparece en la transcripcion.",
+                "supported_count": 3,
+                "unsupported_count": 1,
+                "issues": [
+                    {
+                        "claim": "El equipo aprobo un plan anual.",
+                        "problem": "no_en_fuente",
+                        "evidence": "Sin evidencia localizada",
+                        "recommendation": "Eliminar o marcar como No consta.",
+                    }
+                ],
+            }
+        ),
+    )
+    with app.app_context():
+        project = Project(
+            title="Jornada verificable",
+            source_filename="evento.mp3",
+            source_file_path="evento.mp3",
+            language="es",
+            status="completed",
+        )
+        project.output = ProjectOutput(
+            full_transcript="La ponente explico el plan.",
+            cleaned_transcript="La ponente explico el plan.",
+            final_dossier_markdown="# Dossier\n\nEl equipo aprobo un plan anual.",
+        )
+        db.session.add(project)
+        db.session.commit()
+        project_id = project.id
+
+    response = client.post(f"/projects/{project_id}/verify-dossier", follow_redirects=False)
+
+    assert response.status_code == 302
+    with app.app_context():
+        project = Project.query.get(project_id)
+        quality = json.loads(project.output.quality_report_json)
+        review = quality["grounding_review"]
+        assert review["verdict"] == "revisar"
+        assert review["unsupported_count"] == 1
+        assert review["issues"][0]["claim"] == "El equipo aprobo un plan anual."
+        assert any("Verificacion factual completada: revisar" in log.message for log in project.logs)
+
+    response = client.get(f"/projects/{project_id}")
+    html = response.get_data(as_text=True)
+    assert "Verificacion factual" in html
+    assert "El equipo aprobo un plan anual." in html
 
 
 def test_project_status_htmx_includes_public_link_oob_when_completed(client, app):
