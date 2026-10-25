@@ -10,7 +10,7 @@ descargable.
 - Sube vídeo o audio.
 - Extrae y divide audio con ffmpeg.
 - Transcribe con OpenAI.
-- Limpia transcripción, resume por bloques y genera un dossier final.
+- Conserva la transcripción sin reescribirla con IA, resume por bloques y genera un dossier final.
 - Permite revisar transcripción, resumen y dossier en la web.
 - Exporta Markdown, DOCX y PDF para transcripciones.
 - Mantiene historial, estados y logs por proyecto.
@@ -51,7 +51,7 @@ descargable.
 - `OPENAI_API_KEY`: API key de OpenAI.
 - `OPENAI_TRANSCRIPTION_MODEL`: por defecto `gpt-4o-transcribe`.
 - `OPENAI_SUMMARY_MODEL`: por defecto `gpt-5.4-mini`.
-- `TRANSCRIPT_CHUNK_MINUTES`: objetivo de fragmentos, por defecto `20`; los cortes se ajustan a silencios cercanos cuando es posible.
+- `TRANSCRIPT_CHUNK_MINUTES`: objetivo de fragmentos, por defecto `3`, con máximo de seguridad de 3 minutos aunque exista una configuración antigua de 20. Los cortes se ajustan a silencios cercanos cuando es posible y comparten 5 segundos.
 
 ## Migraciones
 
@@ -89,6 +89,11 @@ pytest
 ```
 
 Los tests no llaman a OpenAI real.
+
+La prueba de corte de audio real usa `ffmpeg` si está en PATH o en la variable
+`FFMPEG_TEST_BINARY`. Sin ese ejecutable se omite únicamente esa prueba.
+Los detalles de los controles y su validación están en
+[Transcripciones fiables](docs/transcription-reliability.md).
 
 Si prefieres aislar dependencias:
 

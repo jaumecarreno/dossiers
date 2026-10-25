@@ -208,6 +208,10 @@ def build_quality_report(project, output, metrics: dict[str, Any] | None = None)
         warnings.append("Faltan secciones esperadas del dossier profesional.")
     if getattr(project, "chunks", []) and segments["total"] == 0:
         warnings.append("No hay segmentos con marcas de tiempo.")
+    if segments["audio_intervals"]:
+        warnings.append("Las notas de tiempo incluyen intervalos de audio, no alineacion exacta de frases.")
+    if getattr(project, "chunks", []) and not segments["all_checked"]:
+        warnings.append("Hay fragmentos sin los controles nuevos de truncamiento. No se ha verificado su integridad.")
 
     model = (
         getattr(project, "transcription_model", None)
@@ -363,16 +367,29 @@ def _build_social_posts(text: str) -> list[str]:
 def _segment_stats(chunks) -> dict[str, Any]:
     total = 0
     speaker_tagged = 0
+    audio_intervals = 0
+    all_checked = bool(chunks)
     for chunk in chunks:
         raw = getattr(chunk, "segments_json", None)
         if not raw:
+            all_checked = False
             continue
         try:
             segments = json.loads(raw)
         except json.JSONDecodeError:
+            all_checked = False
             continue
         if not isinstance(segments, list):
+            all_checked = False
             continue
+        all_checked = all_checked and bool(segments) and all(
+            isinstance(segment, dict) and segment.get("transcription_checked") == 1
+            for segment in segments
+        )
+        audio_intervals += sum(
+            1 for segment in segments
+            if isinstance(segment, dict) and segment.get("timing") == "audio_interval"
+        )
         total += len(segments)
         speaker_tagged += sum(
             1
@@ -383,4 +400,6 @@ def _segment_stats(chunks) -> dict[str, Any]:
         "total": total,
         "speaker_tagged": speaker_tagged,
         "speaker_support_ready": True,
+        "audio_intervals": audio_intervals,
+        "all_checked": all_checked,
     }

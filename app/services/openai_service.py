@@ -2,21 +2,22 @@ from __future__ import annotations
 
 from pathlib import Path
 import time
+import re
 
 from flask import current_app
 from openai import OpenAI
+from app.services.transcription_guard import IncompleteTranscription, validate_transcription
 
 from app.services.prompts import (
     block_summary_prompt,
-    clean_transcript_prompt,
     dossier_grounding_review_prompt,
     final_dossier_prompt,
     linkedin_posts_prompt,
 )
 
 
-def _client() -> OpenAI:
-    return OpenAI(api_key=current_app.config.get("OPENAI_API_KEY"))
+def _client(*, max_retries: int = 2) -> OpenAI:
+    return OpenAI(api_key=current_app.config.get("OPENAI_API_KEY"), max_retries=max_retries)
 
 
 def _text_response(system_prompt: str, user_prompt: str) -> str:
@@ -70,7 +71,9 @@ def transcribe_audio(
         max_attempts = 4
         for attempt in range(max_attempts):
             try:
-                response = _client().audio.transcriptions.create(**kwargs)
+                # This loop owns retries; disable SDK retries to avoid multiplying
+                # four attempts into twelve requests for the same audio.
+                response = _client(max_retries=0).audio.transcriptions.create(**kwargs)
                 break
             except openai.BadRequestError as e:
                 message = str(e)
@@ -124,11 +127,19 @@ def transcribe_audio(
                 "text": getattr(s, "text", "")
             })
             
+    usage = response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
+    output_tokens = usage.get("output_tokens") if isinstance(usage, dict) else getattr(usage, "output_tokens", None)
+    finish_reason = response.get("finish_reason") if isinstance(response, dict) else getattr(response, "finish_reason", None)
+    if finish_reason in {"length", "max_tokens"}:
+        raise IncompleteTranscription("El proveedor indica que la respuesta fue recortada.")
+    validate_transcription(text, selected_model, output_tokens)
     return text.strip(), clean_segments
 
 
 def clean_transcript(text: str, language: str) -> str:
-    return _text_response(clean_transcript_prompt(language), text)
+    # A transcript is a source, not a generated summary. Preserve every word and
+    # original language; editing by a second model can silently omit whole passages.
+    return re.sub(r"\n{3,}", "\n\n", text.replace("\r\n", "\n")).strip()
 
 
 def summarize_chunk(text: str, language: str) -> str:

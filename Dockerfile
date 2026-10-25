@@ -3,6 +3,7 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=3000 \
+    TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache \
     GUNICORN_TIMEOUT=7200 \
     GUNICORN_GRACEFUL_TIMEOUT=120
 
@@ -14,6 +15,7 @@ RUN apt-get update \
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN python -c "import tiktoken; tiktoken.get_encoding('o200k_base')"
 
 COPY . .
 RUN mkdir -p /storage \
