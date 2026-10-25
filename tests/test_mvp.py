@@ -1055,7 +1055,7 @@ def test_transcript_content_uses_time_ranges_before_paragraphs(app):
                 start_seconds=0,
                 end_seconds=90,
                 status="completed",
-                transcript_text="Texto con marcas",
+                    transcript_text="Primer bloque. Segundo bloque.",
                 segments_json=json.dumps(
                     [
                         {"start": 0.0, "end": 39.0, "text": "Primer bloque."},
@@ -1153,28 +1153,28 @@ def test_parse_silencedetect_output_reads_ranges():
 
 def test_plan_audio_chunks_prefers_silences_inside_window():
     chunks = plan_audio_chunks(
-        3000,
-        [(1000, 1203), (2390, 2406)],
+        350,
+        [(174, 175), (340, 345)],
     )
 
-    assert chunks == [(0.0, 1203), (1188, 2406), (2391, 3000)]
+    assert chunks == [(0.0, 175), (170, 350)]
 
 
 def test_plan_audio_chunks_falls_back_to_safe_limit_without_silence():
-    chunks = plan_audio_chunks(3000, [])
+    chunks = plan_audio_chunks(400, [])
 
-    assert chunks == [(0.0, 1320.0), (1305.0, 2625.0), (2610.0, 3000)]
+    assert chunks == [(0.0, 180.0), (175.0, 355.0), (350.0, 400)]
 
 
 def test_plan_audio_chunks_respects_size_limit_and_overlap():
     chunks = plan_audio_chunks(
-        900,
+        200,
         [],
-        max_chunk_bytes=5 * 1024 * 1024,
+        max_chunk_bytes=800_000,
         audio_bitrate_bps=64_000,
     )
 
-    assert chunks == [(0.0, 655.0), (640.0, 900)]
+    assert chunks == [(0.0, 100.0), (95.0, 195.0), (190.0, 200)]
 
 
 def test_dedupe_overlap_removes_repeated_overlap_text():
@@ -1184,8 +1184,8 @@ def test_dedupe_overlap_removes_repeated_overlap_text():
     assert _dedupe_overlap(previous, current) == "con el cierre final"
 
 
-def test_chunk_overlap_increased_to_15():
-    assert CHUNK_OVERLAP_SECONDS == 15
+def test_chunk_overlap_keeps_cost_bounded():
+    assert CHUNK_OVERLAP_SECONDS == 5
 
 
 def test_dedupe_overlap_handles_longer_overlap():
@@ -1363,13 +1363,13 @@ def test_process_project_reports_failed_chunk_context(app, tmp_path, monkeypatch
         chunk_path = output / "chunk_001.mp3"
         chunk_path.parent.mkdir(parents=True, exist_ok=True)
         chunk_path.write_bytes(b"chunk-audio")
-        return [AudioChunk(chunk_path, 0, 1200)]
+        return [AudioChunk(chunk_path, 0, 180)]
 
     def fake_transcribe_audio(*_args, **_kwargs):
         raise RuntimeError("OpenAI timeout")
 
     monkeypatch.setattr("app.tasks.ensure_media_tools_available", lambda: None)
-    monkeypatch.setattr("app.tasks.get_media_duration", lambda _path: 1200)
+    monkeypatch.setattr("app.tasks.get_media_duration", lambda _path: 180)
     monkeypatch.setattr("app.tasks.prepare_audio", fake_prepare_audio)
     monkeypatch.setattr("app.tasks.split_audio", fake_split_audio)
     monkeypatch.setattr("app.tasks.transcribe_audio", fake_transcribe_audio)
@@ -1400,7 +1400,7 @@ def test_process_project_reports_failed_chunk_context(app, tmp_path, monkeypatch
         assert "Fallo al transcribir el fragmento 1/1" in project.error_message
         assert "OpenAI timeout" in project.error_message
         assert project.chunks[0].status == "failed"
-        assert "0:00-20:00" in project.chunks[0].error_message
+        assert "0:00-3:00" in project.chunks[0].error_message
         assert any(
             "Fallo al transcribir el fragmento 1/1" in log.message
             for log in project.logs
@@ -1419,8 +1419,8 @@ def test_process_project_uses_project_transcription_model(app, tmp_path, monkeyp
     def fake_split_audio(_audio_path, output_dir, _chunk_minutes):
         output = Path(output_dir)
         return [
-            AudioChunk(output / "chunk_001.mp3", 0, 1200),
-            AudioChunk(output / "chunk_002.mp3", 1194, 1800),
+            AudioChunk(output / "chunk_001.mp3", 0, 10),
+            AudioChunk(output / "chunk_002.mp3", 5, 15),
         ]
 
     def fake_transcribe_audio(file_path, language, model=None, prompt=None):
@@ -1436,7 +1436,7 @@ def test_process_project_uses_project_transcription_model(app, tmp_path, monkeyp
             return "apertura con nombres propios repetidos", []
         return "nombres propios repetidos y cierre final", []
 
-    monkeypatch.setattr("app.tasks.get_media_duration", lambda _path: 1800)
+    monkeypatch.setattr("app.tasks.get_media_duration", lambda _path: 10)
     monkeypatch.setattr("app.tasks.ensure_media_tools_available", lambda: None)
     monkeypatch.setattr("app.tasks.prepare_audio", fake_prepare_audio)
     monkeypatch.setattr("app.tasks.split_audio", fake_split_audio)
@@ -1473,12 +1473,12 @@ def test_process_project_uses_project_transcription_model(app, tmp_path, monkeyp
         project = Project.query.get(project_id)
         assert project.status == "completed"
         assert [call["model"] for call in calls] == ["whisper-1", "whisper-1"]
-        assert calls[0]["language"] == "es"
+        assert calls[0]["language"] == "auto"
         assert "Jornada de producto" in calls[0]["prompt"]
         assert "Cliente Uno" in calls[0]["prompt"]
         assert "apertura con nombres propios repetidos" in calls[1]["prompt"]
-        assert [chunk.start_seconds for chunk in project.chunks] == [0, 1194]
-        assert [chunk.end_seconds for chunk in project.chunks] == [1200, 1800]
+        assert [chunk.start_seconds for chunk in project.chunks] == [0, 5]
+        assert [chunk.end_seconds for chunk in project.chunks] == [10, 15]
         assert (
             project.output.full_transcript
             == "apertura con nombres propios repetidos\n\ny cierre final"
@@ -1590,11 +1590,11 @@ def test_openai_service_uses_mocked_client(app, tmp_path, monkeypatch):
         audio = FakeAudio()
         responses = FakeResponses()
 
-    monkeypatch.setattr("app.services.openai_service._client", lambda: FakeClient())
+    monkeypatch.setattr("app.services.openai_service._client", lambda **_kwargs: FakeClient())
 
     with app.app_context():
         assert transcribe_audio(str(audio_path), "es") == ("Transcripción simulada", [{"start": 0.0, "end": 2.0, "text": "Transcripción simulada"}])
-        assert clean_transcript("texto", "es") == "Texto limpio"
+        assert clean_transcript("texto", "es") == "texto"
 
 
 def test_openai_transcription_retries_transient_errors(app, tmp_path, monkeypatch):
@@ -1622,7 +1622,7 @@ def test_openai_transcription_retries_transient_errors(app, tmp_path, monkeypatc
     class FakeClient:
         audio = FakeAudio()
 
-    monkeypatch.setattr("app.services.openai_service._client", lambda: FakeClient())
+    monkeypatch.setattr("app.services.openai_service._client", lambda **_kwargs: FakeClient())
     monkeypatch.setattr("app.services.openai_service.time.sleep", lambda _seconds: None)
 
     with app.app_context():
@@ -1655,7 +1655,7 @@ def test_openai_service_keeps_verbose_json_for_whisper(app, tmp_path, monkeypatc
     class FakeClient:
         audio = FakeAudio()
 
-    monkeypatch.setattr("app.services.openai_service._client", lambda: FakeClient())
+    monkeypatch.setattr("app.services.openai_service._client", lambda **_kwargs: FakeClient())
 
     with app.app_context():
         assert transcribe_audio(

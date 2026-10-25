@@ -68,6 +68,12 @@ def get_transcript_content(project, include_timestamps: bool = False) -> str:
             
         try:
             segments = json.loads(chunk.segments_json)
+            # Never lose words when segment metadata is empty, partial, or differs
+            # from the canonical text (e.g. overlap removed after adaptive retries).
+            segment_text = " ".join(seg.get("text", "") for seg in segments)
+            if segment_text.split() != (chunk.transcript_text or "").split():
+                lines.append(_timestamped_block(offset, fallback_end, chunk.transcript_text or ""))
+                continue
             
             current_paragraph_start = None
             current_paragraph_end = None

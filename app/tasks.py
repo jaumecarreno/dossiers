@@ -5,12 +5,12 @@ from pathlib import Path
 import json
 import string
 import time
+import math
 
 from flask import current_app, has_app_context
 
 from app.constants import (
     DEFAULT_TRANSCRIPTION_MODEL,
-    LANGUAGE_CHOICES,
     SOURCE_KIND_TRANSCRIPT_FILES,
 )
 from app.extensions import db
@@ -37,6 +37,9 @@ from app.services.quality_service import (
     json_loads_object,
 )
 from app.services.transcript_import_service import load_transcript_texts_from_manifest
+from app.services.reliable_transcription_service import transcribe_complete
+from app.services.transcript_join_service import dedupe_overlap
+from app.services.transcription_guard import tokenizer
 from app.storage import project_audio_dir, project_chunks_dir, project_outputs_dir
 
 
@@ -198,7 +201,7 @@ def _split_text(text: str, max_chars: int = 12000) -> list[str]:
     return parts
 
 
-def _last_words(text: str, max_words: int = 300) -> str:
+def _last_words(text: str, max_words: int = 60) -> str:
     words = text.split()
     return " ".join(words[-max_words:])
 
@@ -225,10 +228,9 @@ def _extract_key_terms(text: str, max_terms: int = 30) -> list[str]:
 
 
 def _build_transcription_prompt(project: Project, previous_text: str = "") -> str:
-    language = LANGUAGE_CHOICES.get(project.language, project.language)
     context_parts = [
-        "Transcribe el audio con precisión y conserva nombres propios, cifras y terminología.",
-        f"Idioma esperado: {language}.",
+        "Transcribe todo literalmente, sin resumir ni traducir. Conserva cada idioma que se oiga, "
+        "tambien si cambia durante el audio, nombres propios, cifras y terminologia.",
         f"Título: {project.title}.",
     ]
     if project.client_name:
@@ -248,34 +250,21 @@ def _build_transcription_prompt(project: Project, previous_text: str = "") -> st
                 f"Vocabulario recurrente (conservar grafía): {', '.join(key_terms)}"
             )
         context_parts.append(
-            "Contexto inmediatamente anterior para continuidad, no lo repitas si ya aparece: "
+            "Contexto anterior solo como referencia; transcribe todo lo que se oiga en este audio: "
             f"{_last_words(previous_text)}"
         )
-    return "\n".join(context_parts)
-
-
-def _normalize_word(word: str) -> str:
-    return word.strip(string.punctuation + "¿¡“”‘’«»").casefold()
+    # Keep context cost bounded even for a very large user glossary/event title.
+    encoding = tokenizer()
+    return encoding.decode(encoding.encode("\n".join(context_parts), disallowed_special=())[:384])
 
 
 def _dedupe_overlap(
     previous_text: str,
     current_text: str,
-    max_words: int = 120,
+    max_words: int = 40,
     min_words: int = 3,
 ) -> str:
-    previous_words = previous_text.split()
-    current_words = current_text.split()
-    if not previous_words or not current_words:
-        return current_text
-
-    max_overlap = min(max_words, len(previous_words), len(current_words))
-    previous_norm = [_normalize_word(word) for word in previous_words]
-    current_norm = [_normalize_word(word) for word in current_words]
-    for overlap in range(max_overlap, min_words - 1, -1):
-        if previous_norm[-overlap:] == current_norm[:overlap]:
-            return " ".join(current_words[overlap:]).strip()
-    return current_text
+    return dedupe_overlap(previous_text, current_text, max_words, min_words)
 
 
 def _append_transcript(transcripts: list[str], text: str) -> int:
@@ -310,6 +299,32 @@ def _build_full_transcript_from_transcript_files(project: Project) -> str:
     return full_transcript
 
 
+def _store_full_transcript(output: ProjectOutput, text: str) -> None:
+    if output.full_transcript != text:
+        # Explicit retries must not pair newly recovered speech with stale outputs.
+        # Human-reviewed text is preserved and remains the preferred editorial source.
+        output.cleaned_transcript = None
+        output.block_summary = None
+        output.final_dossier_markdown = None
+        output.final_dossier_docx_path = None
+        output.final_dossier_pdf_path = None
+        output.output_variants_json = None
+        output.quality_report_json = None
+    output.full_transcript = text
+
+
+def _check_audio_coverage(chunks, duration: float) -> None:
+    end = 0
+    for chunk in chunks:
+        if (chunk.start_seconds is None or chunk.end_seconds is None
+                or chunk.start_seconds > end or chunk.end_seconds <= chunk.start_seconds):
+            raise RuntimeError("Los fragmentos dejan un intervalo de audio sin cubrir. Revisa el procesamiento.")
+        end = max(end, chunk.end_seconds)
+    # DB boundaries are rounded to seconds; preserve a one-second rounding allowance.
+    if not chunks or end < duration - 1:
+        raise RuntimeError("Los fragmentos no cubren el final del audio. Revisa el procesamiento.")
+
+
 def _complete_project_from_transcript(
     project: Project, full_transcript: str, metrics: dict | None = None
 ) -> None:
@@ -318,7 +333,7 @@ def _complete_project_from_transcript(
     if not output:
         output = ProjectOutput(project_id=project.id)
         db.session.add(output)
-    output.full_transcript = full_transcript
+    _store_full_transcript(output, full_transcript)
     db.session.commit()
 
     if not output.cleaned_transcript:
@@ -380,7 +395,8 @@ def _process_project(project_id: int) -> None:
         started_at = time.monotonic()
         _set_status(project, "extracting_audio", "Preparando audio con ffmpeg.")
         ensure_media_tools_available()
-        project.duration_seconds = get_media_duration(source_path)
+        source_duration = get_media_duration(source_path)
+        project.duration_seconds = math.ceil(source_duration) if source_duration else None
         _add_project_log(
             project,
             f"Duracion detectada: {_format_seconds(project.duration_seconds)}.",
@@ -413,6 +429,7 @@ def _process_project(project_id: int) -> None:
             _add_project_log(project, f"Audio dividido en {len(chunk_specs)} fragmentos.")
             db.session.commit()
         _finish_phase(metrics, "splitting_audio", started_at)
+        _check_audio_coverage(project.chunks, get_media_duration(audio_path) or 0)
 
         started_at = time.monotonic()
         _set_status(project, "transcribing", "Transcribiendo fragmentos con OpenAI.")
@@ -424,7 +441,15 @@ def _process_project(project_id: int) -> None:
         )
         total_chunks = len(project.chunks)
         for chunk in project.chunks:
-            if chunk.status == "completed" and chunk.transcript_text:
+            try:
+                saved_segments = json.loads(chunk.segments_json or "[]")
+            except (ValueError, TypeError):
+                saved_segments = []
+            verified = isinstance(saved_segments, list) and bool(saved_segments) and all(
+                isinstance(s, dict) and s.get("transcription_checked") == 1
+                for s in saved_segments
+            )
+            if chunk.status == "completed" and verified:
                 metrics["overlap_removed_words"] += _append_transcript(
                     transcripts, chunk.transcript_text
                 )
@@ -442,15 +467,24 @@ def _process_project(project_id: int) -> None:
             db.session.commit()
             try:
                 prompt = _build_transcription_prompt(project, "\n\n".join(transcripts))
-                text, segments = transcribe_audio(
+                def log_retry(reason):
+                    metrics["transcription_subdivisions"] = metrics.get("transcription_subdivisions", 0) + 1
+                    _add_project_log(project, f"Revisando fragmento {chunk.chunk_index} en partes menores: {reason}", level="warning")
+                    db.session.commit()
+
+                text, segments = transcribe_complete(
                     chunk.audio_path,
-                    project.language,
+                    "auto",
                     model=transcription_model,
                     prompt=prompt,
+                    duration_seconds=get_media_duration(chunk.audio_path),
+                    transcriber=transcribe_audio,
+                    on_retry=log_retry,
                 )
                 chunk.transcript_text = text
                 chunk.segments_json = json.dumps(segments) if segments else None
                 chunk.status = "completed"
+                chunk.error_message = None
                 metrics["overlap_removed_words"] += _append_transcript(
                     transcripts, chunk.transcript_text or ""
                 )
@@ -473,11 +507,13 @@ def _process_project(project_id: int) -> None:
 
         _finish_phase(metrics, "transcribing", started_at)
         full_transcript = "\n\n".join(transcripts).strip()
+        if not full_transcript:
+            raise RuntimeError("No se ha obtenido habla transcrita; revisa el audio antes de generar el dossier.")
         output = ProjectOutput.query.filter_by(project_id=project.id).one_or_none()
         if not output:
             output = ProjectOutput(project_id=project.id)
             db.session.add(output)
-        output.full_transcript = full_transcript
+        _store_full_transcript(output, full_transcript)
         db.session.commit()
 
         if not output.cleaned_transcript:

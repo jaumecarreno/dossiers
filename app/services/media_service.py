@@ -20,10 +20,10 @@ class AudioChunk:
 
 SILENCE_DB = "-35dB"
 MIN_SILENCE_SECONDS = 0.7
-TARGET_CHUNK_SECONDS = 20 * 60
-MIN_CHUNK_SECONDS = 16 * 60
-MAX_CHUNK_SECONDS = 22 * 60
-CHUNK_OVERLAP_SECONDS = 15
+TARGET_CHUNK_SECONDS = 180
+MIN_CHUNK_SECONDS = 150
+MAX_CHUNK_SECONDS = 180
+CHUNK_OVERLAP_SECONDS = 5
 MAX_CHUNK_BYTES = 23 * 1024 * 1024
 TARGET_AUDIO_BITRATE_BPS = 64_000
 SPEECH_FILTERS = ",".join(
@@ -64,7 +64,7 @@ def ensure_media_tools_available() -> None:
         )
 
 
-def get_media_duration(input_path: str | Path) -> int | None:
+def get_media_duration(input_path: str | Path) -> float | None:
     command = [
         "ffprobe",
         "-v",
@@ -79,7 +79,7 @@ def get_media_duration(input_path: str | Path) -> int | None:
     value = result.stdout.strip()
     if not value:
         return None
-    return int(float(value))
+    return float(value)
 
 
 def prepare_audio(input_path: str | Path, output_path: str | Path) -> Path:
@@ -189,7 +189,11 @@ def plan_audio_chunks(
         return []
 
     size_limited_seconds = int((max_chunk_bytes * 8) / audio_bitrate_bps)
-    hard_max_seconds = max(60, min(max_seconds, size_limited_seconds))
+    hard_max_seconds = min(MAX_CHUNK_SECONDS, max_seconds, size_limited_seconds, max(1, target_seconds))
+    if hard_max_seconds <= 0 or overlap_seconds < 0 or overlap_seconds >= hard_max_seconds:
+        raise ValueError("Duracion o solapamiento de fragmentos no valido.")
+    target_seconds = max(1, min(target_seconds, hard_max_seconds))
+    min_seconds = min(min_seconds, target_seconds)
     plans: list[tuple[float, float]] = []
     start = 0.0
 
@@ -207,7 +211,7 @@ def plan_audio_chunks(
             for _, silence_end in silences
             if min_cut <= silence_end <= max_cut
         ]
-        cut = min(candidates, key=lambda value: abs(value - target_cut)) if candidates else max_cut
+        cut = min(candidates, key=lambda value: abs(value - target_cut)) if candidates else target_cut
         plans.append((start, cut))
 
         next_start = max(0.0, cut - overlap_seconds)
@@ -221,7 +225,7 @@ def plan_audio_chunks(
 def split_audio(
     input_audio_path: str | Path,
     output_dir: str | Path,
-    chunk_minutes: int = 20,
+    chunk_minutes: int = 3,
     silence_db: str = SILENCE_DB,
     min_silence_seconds: float = MIN_SILENCE_SECONDS,
 ) -> list[AudioChunk]:
@@ -274,5 +278,18 @@ def split_audio(
     if not chunks:
         raise MediaProcessingError("No se genero ningun fragmento de audio.")
     return chunks
+
+
+def extract_audio_range(input_path: str | Path, output_path: str | Path,
+                        start: float, end: float) -> Path:
+    """Extract a retry fragment without changing the original audio."""
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    _run([
+        "ffmpeg", "-y", "-ss", f"{start:.3f}", "-i", str(input_path),
+        "-t", f"{end - start:.3f}", "-vn", "-acodec", "libmp3lame",
+        "-ar", "16000", "-ac", "1", "-b:a", "64k", str(output),
+    ])
+    return output
 
 
