@@ -1,4 +1,4 @@
-# Controles de integridad de transcripción — Dossiers 1.11
+# Controles de integridad de transcripción — Dossiers 1.12
 
 ## Problema corregido
 
@@ -65,7 +65,7 @@ sin Docker, `tiktoken` descarga su recurso la primera vez; puede precargarse con
 
 ## Validación realizada
 
-- Suite de 81 pruebas aprobada, incluyendo la extracción real de audio con ffmpeg.
+- Suite de 92 pruebas aprobada, incluyendo la extracción real de audio con ffmpeg.
 - Reproducción simulada del recorte a 2.047 tokens; recuperación de ambas mitades,
   offsets, límites de reintento y rechazo de resultados parcialmente recuperados.
 - Prueba del worker con base de datos: si la recuperación falla, el proyecto y
@@ -84,3 +84,34 @@ completa con los vídeos originales. Estos controles corrigen el truncamiento
 observado y detectan algunos otros fallos, pero no prueban la exactitud de cada
 palabra ni permiten garantizar que un modelo nunca omita una frase. Silencio,
 música o audio muy difícil pueden requerir revisión manual.
+
+## Exportación corregida en 1.12
+
+El procesado y la exportación usan la misma unión conservadora. Antes, la
+exportación con tiempos reconstruía los fragmentos sin quitar el prefijo que
+ya había eliminado el procesado. Se comprueba que todas las palabras coincidan
+con la transcripción principal; si los datos antiguos no permiten reconstruirla,
+se entrega el texto principal completo sin inventar marcas de tiempo.
+
+Los intervalos sintéticos, los segmentos parciales y las uniones recortadas se
+presentan como referencias de inicio «aprox.». No son alineación de palabras.
+Se conservan los rangos del proveedor solo si contienen todo el texto y no se
+solapan. La revisión humana sigue teniendo prioridad. No hay llamadas nuevas de
+IA, migraciones ni reprocesado de proyectos existentes.
+
+Comprobación de lectura del proyecto 49: 120 bloques, 6.140 palabras en los
+fragmentos del archivo con tiempos frente a 5.989 en el texto principal. La nueva
+exportación conserva exactamente las 5.989 palabras y no reintroduce las 151
+palabras de diferencia. Este dato comprueba la exportación, no la fidelidad al audio.
+
+### Pendiente para una sincronización precisa
+
+La versión 1.12 corrige la duplicación al exportar; no resuelve toda ambigüedad de
+reconocimiento en las uniones. Se mantienen las coincidencias cortas de una o dos
+palabras y las variantes que no coinciden exactamente para no borrar habla real.
+Para decidirlas hace falta contrastar el audio, con tiempos de palabras o un
+alineador. Antes de introducirlo: evaluar español/catalán, pausas, repeticiones
+reales y palabras cortadas; medir coste y recursos de despliegue; validar contra
+fragmentos de audio escuchados. No basta con cambiar las etiquetas de tiempo ni
+con deduplicar una palabra de forma indiscriminada. Los TXT de TurboScribe no
+permiten inferir su mecanismo interno. No se ha hecho una nueva prueba pagada.

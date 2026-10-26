@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import json
+import math
 import re
 import textwrap
 from pathlib import Path
 
-import json
 from docx import Document
 from docx.shared import Pt
 
+from app.services.transcript_join_service import append_transcript
+
 
 _TIMESTAMP_LINE_RE = re.compile(
-    r"^\(\d{1,2}:\d{2}(?::\d{2})?\s+-\s+\d{1,2}:\d{2}(?::\d{2})?\)$"
+    r"^\(\d+:\d{2}(?::\d{2})?(?:\s+-\s+\d+:\d{2}(?::\d{2})?| aprox\.)\)$"
 )
 
 
@@ -33,13 +36,6 @@ def _timestamped_block(start_seconds: float, end_seconds: float | None, text: st
     return f"{format_time_range(start_seconds, end_seconds)}\n{text.strip()}"
 
 
-def _float_or_default(value, default: float) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
 def get_transcript_content(project, include_timestamps: bool = False) -> str:
     reviewed_transcript = ""
     if project.output and project.output.reviewed_transcript:
@@ -52,75 +48,69 @@ def get_transcript_content(project, include_timestamps: bool = False) -> str:
             return project.output.full_transcript
         return ""
         
-    lines = []
+    # Assemble once using the same boundary rule as the worker. Segment text
+    # must never reintroduce the prefix removed from a chunk.
+    texts, blocks = [], []
     for chunk in project.chunks:
-        offset = chunk.start_seconds or 0
-        fallback_end = chunk.end_seconds if chunk.end_seconds is not None else offset
-        
-        if not chunk.segments_json:
-            if include_timestamps:
-                lines.append(
-                    _timestamped_block(offset, fallback_end, chunk.transcript_text or "")
-                )
-            else:
-                lines.append(chunk.transcript_text or "")
+        before = len(texts)
+        removed = append_transcript(texts, chunk.transcript_text or "")
+        if len(texts) == before:
             continue
-            
+        text = texts[-1]
+        offset = chunk.start_seconds or 0
+        end = chunk.end_seconds if chunk.end_seconds is not None else offset
         try:
-            segments = json.loads(chunk.segments_json)
-            # Never lose words when segment metadata is empty, partial, or differs
-            # from the canonical text (e.g. overlap removed after adaptive retries).
-            segment_text = " ".join(seg.get("text", "") for seg in segments)
-            if segment_text.split() != (chunk.transcript_text or "").split():
-                lines.append(_timestamped_block(offset, fallback_end, chunk.transcript_text or ""))
-                continue
-            
-            current_paragraph_start = None
-            current_paragraph_end = None
-            current_paragraph_text = []
-            
+            segments = json.loads(chunk.segments_json or "[]")
+            valid = bool(segments) and not removed
+            valid = valid and " ".join(s["text"] for s in segments).split() == text.split()
+            previous_end = 0.0
             for seg in segments:
-                segment_start = _float_or_default(seg.get("start"), 0)
-                start = offset + segment_start
-                end = offset + _float_or_default(seg.get("end"), segment_start)
-                text = seg.get("text", "").strip()
-                if not text:
-                    continue
-                    
-                if current_paragraph_start is None:
-                    current_paragraph_start = start
-                    current_paragraph_end = end
-                else:
-                    current_paragraph_end = max(current_paragraph_end or start, end)
-                    
-                current_paragraph_text.append(text)
-                
-                duration = (current_paragraph_end or start) - current_paragraph_start
-                if (duration > 30.0 and text[-1] in ".!?。") or duration > 60.0:
-                    lines.append(
-                        _timestamped_block(
-                            current_paragraph_start,
-                            current_paragraph_end,
-                            " ".join(current_paragraph_text),
-                        )
-                    )
-                    current_paragraph_start = None
-                    current_paragraph_end = None
-                    current_paragraph_text = []
-                    
-            if current_paragraph_text:
-                lines.append(
-                    _timestamped_block(
-                        current_paragraph_start,
-                        current_paragraph_end,
-                        " ".join(current_paragraph_text),
-                    )
-                )
-                
-        except Exception:
-            lines.append(_timestamped_block(offset, fallback_end, chunk.transcript_text or ""))
-            
-    return "\n\n".join(lines).strip()
+                start, finish = float(seg["start"]), float(seg["end"])
+                valid = valid and all(math.isfinite(v) for v in (start, finish))
+                valid = valid and 0 <= previous_end <= start <= finish <= end - offset + 1
+                valid = valid and seg.get("timing") != "audio_interval"
+                previous_end = finish
+        except (ValueError, TypeError, KeyError):
+            valid = False
+        if not valid:
+            blocks.append([offset, end, text, True])
+            continue
+
+        paragraph = []
+        start = finish = None
+        for seg in segments:
+            words = seg["text"].strip()
+            if not words:
+                continue
+            if start is None:
+                start = offset + float(seg["start"])
+            finish = offset + float(seg["end"])
+            paragraph.append(words)
+            duration = finish - start
+            if (duration > 30 and words[-1] in ".!?。") or duration > 60:
+                blocks.append([start, finish, " ".join(paragraph), False])
+                paragraph, start = [], None
+        if paragraph:
+            blocks.append([start, finish, " ".join(paragraph), False])
+
+    canonical = project.output.full_transcript if project.output else None
+    if canonical and canonical.split() != " ".join(texts).split():
+        # Old/edited outputs cannot be aligned safely from stale chunk metadata.
+        # Prefer the complete saved text over invented timestamps or lost words.
+        return canonical
+
+    # Even provider segments may disagree at chunk boundaries. Do not fabricate
+    # word alignment by clamping ranges: show honest approximate start references.
+    for previous, current in zip(blocks, blocks[1:]):
+        if current[0] < previous[0]:
+            return canonical or "\n\n".join(texts)
+        if current[0] < previous[1]:
+            previous[3] = current[3] = True
+    return "\n\n".join(
+        f"({format_time(start)} aprox.)\n{text}" if approximate
+        else _timestamped_block(start, end, text)
+        for start, end, text, approximate in blocks
+    ).strip()
 
 
 def _strip_markdown_inline(text: str) -> str:

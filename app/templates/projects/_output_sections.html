@@ -122,7 +122,7 @@
         <input type="checkbox" id="transcript-timestamps" value="true" />
         Incluir notas de tiempo
       </label>
-      <p class="muted">Sin tiempos por palabra, las notas indican el intervalo de audio procesado, no la posicion exacta de cada frase.</p>
+      <p class="muted">Las referencias «aprox.» indican el inicio del fragmento de audio, no el instante exacto de las palabras. Si las notas guardadas no corresponden al texto completo, se conserva el texto sin añadir tiempos.</p>
       <div class="actions actions-wrap">
         <a class="button button-sm" id="btn-dl-md" href="{{ url_for('main.download_transcript', project_id=project.id, format='md') }}">Markdown</a>
         <a class="button button-sm" id="btn-dl-txt" href="{{ url_for('main.download_transcript', project_id=project.id, format='txt') }}">TXT</a>

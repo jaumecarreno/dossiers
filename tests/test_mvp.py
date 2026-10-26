@@ -1047,7 +1047,7 @@ def test_transcript_content_uses_time_ranges_before_paragraphs(app):
             language="es",
             status="completed",
         )
-        project.output = ProjectOutput(full_transcript="Texto sin marcas")
+        project.output = ProjectOutput(full_transcript="Primer bloque. Segundo bloque.")
         project.chunks.append(
             TranscriptChunk(
                 chunk_index=1,

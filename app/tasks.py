@@ -38,7 +38,7 @@ from app.services.quality_service import (
 )
 from app.services.transcript_import_service import load_transcript_texts_from_manifest
 from app.services.reliable_transcription_service import transcribe_complete
-from app.services.transcript_join_service import dedupe_overlap
+from app.services.transcript_join_service import append_transcript, dedupe_overlap
 from app.services.transcription_guard import tokenizer
 from app.storage import project_audio_dir, project_chunks_dir, project_outputs_dir
 
@@ -268,17 +268,7 @@ def _dedupe_overlap(
 
 
 def _append_transcript(transcripts: list[str], text: str) -> int:
-    cleaned = (text or "").strip()
-    if not cleaned:
-        return 0
-    removed_words = 0
-    if transcripts:
-        original_word_count = len(cleaned.split())
-        cleaned = _dedupe_overlap("\n\n".join(transcripts), cleaned)
-        removed_words = max(0, original_word_count - len(cleaned.split()))
-    if cleaned:
-        transcripts.append(cleaned)
-    return removed_words
+    return append_transcript(transcripts, text)
 
 
 def _build_full_transcript_from_transcript_files(project: Project) -> str:
