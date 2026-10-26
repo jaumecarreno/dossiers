@@ -20,10 +20,10 @@ class AudioChunk:
 
 SILENCE_DB = "-35dB"
 MIN_SILENCE_SECONDS = 0.7
-TARGET_CHUNK_SECONDS = 180
-MIN_CHUNK_SECONDS = 150
-MAX_CHUNK_SECONDS = 180
-CHUNK_OVERLAP_SECONDS = 5
+TARGET_CHUNK_SECONDS = 30
+MIN_CHUNK_SECONDS = 25
+MAX_CHUNK_SECONDS = 30
+CHUNK_OVERLAP_SECONDS = 2
 MAX_CHUNK_BYTES = 23 * 1024 * 1024
 TARGET_AUDIO_BITRATE_BPS = 64_000
 SPEECH_FILTERS = ",".join(
@@ -225,7 +225,7 @@ def plan_audio_chunks(
 def split_audio(
     input_audio_path: str | Path,
     output_dir: str | Path,
-    chunk_minutes: int = 3,
+    chunk_minutes: float = 0.5,
     silence_db: str = SILENCE_DB,
     min_silence_seconds: float = MIN_SILENCE_SECONDS,
 ) -> list[AudioChunk]:

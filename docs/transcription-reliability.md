@@ -1,4 +1,4 @@
-# Controles de integridad de transcripción
+# Controles de integridad de transcripción — Dossiers 1.11
 
 ## Problema corregido
 
@@ -11,9 +11,10 @@ Los proyectos 45 y 46 solo se consultaron como referencia de lectura.
 
 ## Comportamiento
 
-- Cada petición nueva cubre como máximo unos 180 segundos (más el pequeño
-  relleno del códec). La configuración antigua de 20 minutos no evita este límite.
-- Se mantienen 5 segundos de solapamiento. Solo se eliminan coincidencias
+- Cada petición nueva cubre como máximo unos 30 segundos (más el pequeño
+  relleno del códec). Las configuraciones antiguas de 3 o 20 minutos no evitan este límite.
+  La variable de configuración actual es `TRANSCRIPT_CHUNK_SECONDS=30`.
+- Se mantienen 2 segundos de solapamiento. Solo se eliminan coincidencias
   exactas al unir extremos; no se usa otra IA para reconstruir uniones.
 - Los modelos GPT-4o de transcripción se comprueban contra un umbral conservador
   de 1.900 tokens, tanto con el uso informado por la API como con un tokenizador
@@ -49,9 +50,9 @@ transporte están limitados a cuatro intentos y no se multiplican por reintentos
 internos del SDK. Los reintentos por contenido vuelven a enviar únicamente el
 intervalo sospechoso, dividido.
 
-La prueba con 5.960,75 segundos obtiene 35 fragmentos y un 2,85 % de audio
+La prueba con 5.960,75 segundos obtiene 213 fragmentos y un 7,11 % de audio
 adicional por solapamiento sin silencios. El porcentaje varía con los cortes.
-No es una estimación del coste total: también intervienen el texto de salida,
+Los bloques más cortos aumentan el número de peticiones y de contextos enviados frente a la versión 1.1. No es una estimación del coste total: también intervienen el texto de salida,
 el contexto y los reintentos. El contexto se limita a 384 tokens por petición,
 con un máximo de 60 palabras del final del texto anterior. Se elimina el coste
 de la antigua llamada de limpieza. La transcripción completa tiene más texto
@@ -64,7 +65,7 @@ sin Docker, `tiktoken` descarga su recurso la primera vez; puede precargarse con
 
 ## Validación realizada
 
-- Suite de 80 pruebas aprobada, incluyendo la extracción real de audio con ffmpeg.
+- Suite de 81 pruebas aprobada, incluyendo la extracción real de audio con ffmpeg.
 - Reproducción simulada del recorte a 2.047 tokens; recuperación de ambas mitades,
   offsets, límites de reintento y rechazo de resultados parcialmente recuperados.
 - Prueba del worker con base de datos: si la recuperación falla, el proyecto y
@@ -72,7 +73,7 @@ sin Docker, `tiktoken` descarga su recurso la primera vez; puede precargarse con
   anterior que ya estaba comprobado.
 - Exportación con segmentos vacíos o incompletos sin pérdida del texto original.
 - Conservación de texto largo bilingüe durante la limpieza, sin llamadas a IA.
-- Corte real de audio de 181,75 segundos con una señal solo en el último cuarto
+- Corte real de audio de 31,75 segundos con una señal solo en el último cuarto
   de segundo; la señal sobrevive al corte y a la extracción para recuperación.
 - Lectura de las exportaciones existentes: el detector rechaza los cinco bloques
   de 2.047 tokens del proyecto 45 y el primer bloque del proyecto 46. Los otros dos

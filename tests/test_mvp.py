@@ -1153,28 +1153,28 @@ def test_parse_silencedetect_output_reads_ranges():
 
 def test_plan_audio_chunks_prefers_silences_inside_window():
     chunks = plan_audio_chunks(
-        350,
-        [(174, 175), (340, 345)],
+        55,
+        [(26, 27), (50, 52)],
     )
 
-    assert chunks == [(0.0, 175), (170, 350)]
+    assert chunks == [(0.0, 27), (25, 55)]
 
 
 def test_plan_audio_chunks_falls_back_to_safe_limit_without_silence():
-    chunks = plan_audio_chunks(400, [])
+    chunks = plan_audio_chunks(65, [])
 
-    assert chunks == [(0.0, 180.0), (175.0, 355.0), (350.0, 400)]
+    assert chunks == [(0.0, 30.0), (28.0, 58.0), (56.0, 65)]
 
 
 def test_plan_audio_chunks_respects_size_limit_and_overlap():
     chunks = plan_audio_chunks(
-        200,
+        45,
         [],
-        max_chunk_bytes=800_000,
+        max_chunk_bytes=160_000,
         audio_bitrate_bps=64_000,
     )
 
-    assert chunks == [(0.0, 100.0), (95.0, 195.0), (190.0, 200)]
+    assert chunks == [(0.0, 20.0), (18.0, 38.0), (36.0, 45)]
 
 
 def test_dedupe_overlap_removes_repeated_overlap_text():
@@ -1185,7 +1185,7 @@ def test_dedupe_overlap_removes_repeated_overlap_text():
 
 
 def test_chunk_overlap_keeps_cost_bounded():
-    assert CHUNK_OVERLAP_SECONDS == 5
+    assert CHUNK_OVERLAP_SECONDS == 2
 
 
 def test_dedupe_overlap_handles_longer_overlap():
@@ -1363,13 +1363,13 @@ def test_process_project_reports_failed_chunk_context(app, tmp_path, monkeypatch
         chunk_path = output / "chunk_001.mp3"
         chunk_path.parent.mkdir(parents=True, exist_ok=True)
         chunk_path.write_bytes(b"chunk-audio")
-        return [AudioChunk(chunk_path, 0, 180)]
+        return [AudioChunk(chunk_path, 0, 30)]
 
     def fake_transcribe_audio(*_args, **_kwargs):
         raise RuntimeError("OpenAI timeout")
 
     monkeypatch.setattr("app.tasks.ensure_media_tools_available", lambda: None)
-    monkeypatch.setattr("app.tasks.get_media_duration", lambda _path: 180)
+    monkeypatch.setattr("app.tasks.get_media_duration", lambda _path: 30)
     monkeypatch.setattr("app.tasks.prepare_audio", fake_prepare_audio)
     monkeypatch.setattr("app.tasks.split_audio", fake_split_audio)
     monkeypatch.setattr("app.tasks.transcribe_audio", fake_transcribe_audio)
@@ -1400,7 +1400,7 @@ def test_process_project_reports_failed_chunk_context(app, tmp_path, monkeypatch
         assert "Fallo al transcribir el fragmento 1/1" in project.error_message
         assert "OpenAI timeout" in project.error_message
         assert project.chunks[0].status == "failed"
-        assert "0:00-3:00" in project.chunks[0].error_message
+        assert "0:00-0:30" in project.chunks[0].error_message
         assert any(
             "Fallo al transcribir el fragmento 1/1" in log.message
             for log in project.logs

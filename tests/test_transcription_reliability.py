@@ -31,7 +31,7 @@ def extraction(monkeypatch):
     return calls
 
 
-def run(transcriber, duration=180, **kwargs):
+def run(transcriber, duration=30, **kwargs):
     return transcribe_complete("source.mp3", "auto", model="gpt-4o-transcribe",
                                prompt="Transcribe todo.", duration_seconds=duration,
                                transcriber=transcriber, **kwargs)
@@ -42,15 +42,32 @@ def test_old_20_minute_configuration_cannot_bypass_safe_limit():
                               min_seconds=960, max_seconds=1320)
     assert spans[0][0] == 0
     assert spans[-1][1] == 5960.75
-    assert all(0 < end-start <= 180 for start, end in spans)
+    assert all(0 < end-start <= 30 for start, end in spans)
     assert all(right[0] <= left[1] for left, right in zip(spans, spans[1:]))
-    assert sum(end-start for start, end in spans) / 5960.75 < 1.03
+    assert sum(end-start for start, end in spans) / 5960.75 < 1.08
 
 
 def test_shorter_config_does_not_create_seconds_of_hop_over_audio():
-    spans = plan_audio_chunks(1000, [], target_seconds=60)
+    spans = plan_audio_chunks(1000, [], target_seconds=15)
     assert spans[-1][1] == 1000
-    assert all(end-start <= 60 for start, end in spans)
+    assert all(end-start <= 15 for start, end in spans)
+
+
+def test_legacy_three_minute_audio_is_split_before_any_api_request(monkeypatch):
+    durations = {}
+    requests = []
+    def extract(source, dest, start, end):
+        durations[str(dest)] = end - start
+        return dest
+    def transcribe(path, *args, **kwargs):
+        assert path in durations  # the original long file must never be submitted
+        requests.append(durations[path])
+        return "contenido de la charla " * 10, []
+    monkeypatch.setattr("app.services.reliable_transcription_service.extract_audio_range", extract)
+    text, segments = run(transcribe, duration=180)
+    assert text and segments
+    assert requests and max(requests) <= 30
+    assert segments[0]["start"] == 0 and segments[-1]["end"] == 180
 
 
 def test_duration_keeps_fractional_final_second(monkeypatch):
@@ -83,11 +100,11 @@ def test_recovery_discards_truncated_parent_keeps_both_children(extraction):
         return (left if len(calls) == 2 else right), []
     text, segments = run(transcriber)
     assert len(calls) == 3
-    assert extraction == [(0, 92.5), (87.5, 180)]
+    assert extraction == [(0, 16), (14, 30)]
     assert text.startswith("Inicio.") and text.endswith("DESPEDIDA FINAL.")
     assert text.count("frase del solapamiento") == 1
     assert "palabra" not in text
-    assert segments[0]["start"] == 0 and segments[-1]["end"] == 180
+    assert segments[0]["start"] == 0 and segments[-1]["end"] == 30
     assert all(s["transcription_checked"] == 1 for s in segments)
 
 
@@ -129,7 +146,7 @@ def test_failed_second_child_does_not_return_first_as_complete(extraction):
 
 def test_empty_response_requires_confirmed_silence(monkeypatch, extraction):
     monkeypatch.setattr("app.services.reliable_transcription_service.detect_silences",
-                        lambda *a, **kw: [(0, 180)])
+                        lambda *a, **kw: [(0, 30)])
     text, segments = run(lambda *a, **kw: ("", []))
     assert text == "" and segments[0]["silence"] is True
     assert extraction == []
@@ -232,7 +249,7 @@ def test_worker_never_completes_partial_audio_and_reuses_checked_chunks(app, tmp
     db.session.commit()
     monkeypatch.setattr("app.tasks.ensure_media_tools_available", lambda: None)
     monkeypatch.setattr("app.tasks.prepare_audio", lambda *a: None)
-    monkeypatch.setattr("app.tasks.get_media_duration", lambda p: 355 if Path(p).name in {"source.mp3", "audio.mp3"} else 180)
+    monkeypatch.setattr("app.tasks.get_media_duration", lambda p: 355 if Path(p).name in {"source.mp3", "audio.mp3"} else 30)
     calls = []
     def broken(path, *a, **kw):
         calls.append(path)
@@ -258,9 +275,9 @@ def test_real_audio_splitting_and_recovery_preserve_final_fractional_second(tmp_
     from app.services import media_service as media
     binary = os.environ.get("FFMPEG_TEST_BINARY") or shutil.which("ffmpeg")
     source = tmp_path / "source.wav"
-    rate, duration = 16000, 181.75
+    rate, duration = 16000, 31.75
     # The only signal is a tone in the last quarter-second. Flooring duration
-    # to 181 seconds would remove it completely, which this test detects.
+    # to 31 seconds would remove it completely, which this test detects.
     samples = array("h", [0]) * int(rate * (duration - .25))
     samples.extend(int(12000 * math.sin(2 * math.pi * 440 * i / rate)) for i in range(rate // 4))
     with wave.open(str(source), "wb") as wav:
@@ -273,11 +290,11 @@ def test_real_audio_splitting_and_recovery_preserve_final_fractional_second(tmp_
     monkeypatch.setattr(media, "get_media_duration", lambda _: duration)
     monkeypatch.setattr(media, "detect_silences", lambda *a: [])
     chunks = media.split_audio(source, tmp_path / "chunks", chunk_minutes=20)
-    assert [(c.start_seconds, c.end_seconds) for c in chunks] == [(0, 180), (175, 181.75)]
-    retry = media.extract_audio_range(chunks[-1].path, tmp_path / "retry.mp3", 3, 6.75)
+    assert [(c.start_seconds, c.end_seconds) for c in chunks] == [(0, 30), (28, 31.75)]
+    retry = media.extract_audio_range(chunks[-1].path, tmp_path / "retry.mp3", 1, 3.75)
     decoded = subprocess.run([binary, "-v", "error", "-i", str(retry), "-f", "s16le", "-ac", "1", "-ar", str(rate), "-"],
                              check=True, capture_output=True).stdout
     pcm = array("h")
     pcm.frombytes(decoded)
-    assert abs(len(pcm) / rate - 3.75) < .15
+    assert abs(len(pcm) / rate - 2.75) < .15
     assert max(abs(s) for s in pcm[-rate // 2:]) > 5000
