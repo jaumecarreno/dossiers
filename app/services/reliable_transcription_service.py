@@ -4,7 +4,9 @@ import math
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from app.services.media_service import detect_silences, extract_audio_range
+from app.services.media_service import (
+    CHUNK_OVERLAP_SECONDS, MAX_CHUNK_SECONDS, detect_silences, extract_audio_range,
+)
 from app.services.transcription_guard import EmptyTranscription, IncompleteTranscription, validate_transcription
 from app.services.transcript_join_service import dedupe_overlap
 
@@ -22,11 +24,12 @@ def transcribe_complete(file_path, language, *, model, prompt, duration_seconds,
 
     def visit(path, length, offset, depth, folder):
         reason = "Fragmento antiguo demasiado largo para transcribir con seguridad."
-        if length <= 181:
+        within_limit = length <= MAX_CHUNK_SECONDS + 1  # codec padding
+        if within_limit:
             try:
                 text, segments = transcriber(str(path), language, model=model, prompt=prompt)
                 validate_transcription(text, model)
-                if length >= 60 and len(text.split()) < length * 0.35:
+                if length >= 20 and len(text.split()) < length * 0.35:
                     raise IncompleteTranscription("Muy poco texto para este intervalo; comprobando en partes menores.")
                 # Only use model timings when they account for all returned words.
                 timed_text = " ".join(s.get("text", "").strip() for s in segments)
@@ -48,23 +51,23 @@ def transcribe_complete(file_path, language, *, model, prompt, duration_seconds,
                         return "", [dict(start=offset, end=offset + length, text="",
                                          timing="audio_interval", silence=True,
                                          transcription_checked=1)]
-                if depth >= 3 or length <= 30:
+                if depth >= 3 or length <= 5:
                     raise IncompleteTranscription(
                         f"Transcripcion incompleta ({offset:.1f}-{offset + length:.1f}s): "
                         f"{reason} Se detuvo para revision, sin aceptar texto parcial."
                     ) from exc
         if on_retry:
             on_retry(reason)
-        # Five seconds shared between children. Only exact boundary text is removed.
+        # Share the same short overlap as the initial cuts.
         midpoint = length / 2
-        overlap = min(2.5, length / 10)
+        overlap = min(CHUNK_OVERLAP_SECONDS / 2, length / 10)
         ranges = [(0, midpoint + overlap), (midpoint - overlap, length)]
         texts, all_segments = [], []
         for index, (start, end) in enumerate(ranges):
             child = Path(folder) / f"{offset:.3f}-{length:.3f}-{depth}-{index}.mp3"
             extract_audio_range(path, child, start, end)
             text, checked = visit(child, end - start, offset + start,
-                                  depth + (length <= 181), folder)
+                                  depth + within_limit, folder)
             if texts and text:
                 text = dedupe_overlap(texts[-1], text, max_words=40)
             if text:

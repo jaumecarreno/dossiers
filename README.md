@@ -51,7 +51,7 @@ descargable.
 - `OPENAI_API_KEY`: API key de OpenAI.
 - `OPENAI_TRANSCRIPTION_MODEL`: por defecto `gpt-4o-transcribe`.
 - `OPENAI_SUMMARY_MODEL`: por defecto `gpt-5.4-mini`.
-- `TRANSCRIPT_CHUNK_MINUTES`: objetivo de fragmentos, por defecto `3`, con máximo de seguridad de 3 minutos aunque exista una configuración antigua de 20. Los cortes se ajustan a silencios cercanos cuando es posible y comparten 5 segundos.
+- `TRANSCRIPT_CHUNK_SECONDS`: objetivo de fragmentos, por defecto `30`, con máximo de seguridad de 30 segundos. Los cortes se ajustan a silencios cercanos y comparten 2 segundos. La antigua variable `TRANSCRIPT_CHUNK_MINUTES` ya no se utiliza; no es necesario cambiarla en el servidor para activar el límite nuevo.
 
 ## Migraciones
 

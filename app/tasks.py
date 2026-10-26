@@ -390,7 +390,7 @@ def _process_project(project_id: int) -> None:
 
         source_path = Path(project.source_file_path)
         audio_path = project_audio_dir(project.id) / "audio.mp3"
-        chunk_minutes = current_app.config["TRANSCRIPT_CHUNK_MINUTES"]
+        chunk_minutes = current_app.config["TRANSCRIPT_CHUNK_SECONDS"] / 60
 
         started_at = time.monotonic()
         _set_status(project, "extracting_audio", "Preparando audio con ffmpeg.")
