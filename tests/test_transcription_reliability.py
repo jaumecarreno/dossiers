@@ -298,3 +298,67 @@ def test_real_audio_splitting_and_recovery_preserve_final_fractional_second(tmp_
     pcm.frombytes(decoded)
     assert abs(len(pcm) / rate - 2.75) < .15
     assert max(abs(s) for s in pcm[-rate // 2:]) > 5000
+
+
+def export_project(parts, canonical=None):
+    chunks = [SimpleNamespace(start_seconds=start, end_seconds=end,
+               transcript_text=text, segments_json=json.dumps(segments))
+              for start, end, text, segments in parts]
+    return SimpleNamespace(chunks=chunks, output=SimpleNamespace(
+        reviewed_transcript=None, full_transcript=canonical))
+
+
+def test_export_overlap_matches_plain_text_without_reintroducing_words():
+    first = "Presentamos al senyor Josep Ramoneda,"
+    second = "al senyor Josep Ramoneda, que participa hoy."
+    canonical = first + "\n\nque participa hoy."
+    project = export_project([
+        (0, 30, first, [dict(start=0, end=30, text=first, timing="audio_interval")]),
+        (28, 58, second, [dict(start=0, end=30, text=second, timing="audio_interval")]),
+    ], canonical)
+    content = get_transcript_content(project, True)
+    assert content == "(0:00 aprox.)\n" + first + "\n\n(0:28 aprox.)\nque participa hoy."
+    assert content.count("Josep Ramoneda") == 1
+    assert get_transcript_content(project, False) == canonical
+
+
+def test_export_fully_duplicated_chunk_does_not_create_empty_block():
+    project = export_project([(0, 30, "uno dos tres", []), (28, 58, "uno dos tres", []),
+                              (56, 86, "uno dos tres cuatro", [])], "uno dos tres cuatro")
+    assert get_transcript_content(project, True) == "(0:00 aprox.)\nuno dos tres\n\n(0:56 aprox.)\ncuatro"
+
+
+@pytest.mark.parametrize("segments", [None, {}, [None], [{"text": "inicio final", "start": "NaN", "end": 30}],
+                                      [{"text": "inicio", "start": 0, "end": 2}]])
+def test_export_invalid_metadata_preserves_all_words(segments):
+    project = export_project([(0, 30, "inicio final", segments)], "inicio final")
+    assert get_transcript_content(project, True) == "(0:00 aprox.)\ninicio final"
+
+
+def test_export_saved_canonical_mismatch_and_human_review_take_priority():
+    project = export_project([(0, 30, "texto antiguo", [])], "texto corregido completo")
+    assert get_transcript_content(project, True) == "texto corregido completo"
+    project.output.reviewed_transcript = "Revision humana."
+    assert get_transcript_content(project, True) == "Revision humana."
+
+
+def test_export_retains_short_repetitions_without_audio_evidence():
+    project = export_project([(0, 30, "Dijo que no", []), (28, 58, "no lo aceptaba", [])],
+                             "Dijo que no no lo aceptaba")
+    assert "no\n\n(0:28 aprox.)\nno" in get_transcript_content(project, True)
+
+
+def test_provider_ranges_that_overlap_are_not_presented_as_exact():
+    project = export_project([
+        (0, 30, "primera frase", [dict(start=0, end=30, text="primera frase")]),
+        (28, 58, "segunda frase", [dict(start=0, end=30, text="segunda frase")]),
+    ], "primera frase segunda frase")
+    assert get_transcript_content(project, True) == "(0:00 aprox.)\nprimera frase\n\n(0:28 aprox.)\nsegunda frase"
+
+
+def test_export_never_invents_order_for_out_of_order_metadata():
+    project = export_project([
+        (0, 30, "primera frase", [dict(start=29, end=30, text="primera frase")]),
+        (28, 58, "segunda frase", []),
+    ], "primera frase segunda frase")
+    assert get_transcript_content(project, True) == "primera frase segunda frase"

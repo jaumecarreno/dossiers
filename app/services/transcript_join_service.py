@@ -12,3 +12,16 @@ def dedupe_overlap(previous_text: str, current_text: str,
         if previous[-count:] == current[:count]:
             return " ".join(current_words[count:]).strip()
     return current_text
+
+
+def append_transcript(transcripts: list[str], text: str) -> int:
+    """Shared canonical join for processing and every exported representation."""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return 0
+    original_count = len(cleaned.split())
+    if transcripts:
+        cleaned = dedupe_overlap("\n\n".join(transcripts), cleaned)
+    if cleaned:
+        transcripts.append(cleaned)
+    return original_count - len(cleaned.split())
